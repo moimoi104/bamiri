@@ -239,7 +239,7 @@ body.practice .hud .nx{font-size:14px;color:#E9ECF3}
 body.practice .blk{cursor:pointer}
 body.practice .blk .h{display:none}
 body:not(.practice) .exitp{display:none}
-body.ro .tools,body.ro #btnAddForm,body.ro #btnUndo,body.ro #btnRedo,body.ro .edit-only{display:none}
+body.ro:not(.recv) .audio-btn,body.ro .tools,body.ro #btnAddForm,body.ro #btnUndo,body.ro #btnRedo,body.ro .edit-only{display:none}
 
 /* modal + toast */
 .modal{position:fixed;inset:0;background:rgba(10,12,18,.5);display:grid;place-items:center;padding:16px;z-index:50}
@@ -397,7 +397,7 @@ body.ro .tools,body.ro #btnAddForm,body.ro #btnUndo,body.ro #btnRedo,body.ro .ed
       <button class="ib tog edit-only" id="tRipple" data-act="ripple" aria-pressed="false" title="隊形を動かすと後ろも一緒にずらす" aria-label="後ろも連動"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1"/><path d="M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg></button>
       <div class="spacer"></div>
       <span class="audio-name hide-sm" id="audioName"></span>
-      <label class="btn sm edit-only" for="audioFile" title="音源を読み込む"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg><span id="audioBtnLbl">音源</span></label>
+      <label class="btn sm audio-btn" for="audioFile" title="音源を読み込む"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg><span id="audioBtnLbl">音源</span></label>
       <input type="file" id="audioFile" accept="audio/*,video/mp4,video/webm,.mp3,.m4a,.wav,.aac,.ogg" hidden>
       <input type="file" id="photoFile" accept="image/*" multiple hidden>
       <button class="ib" data-act="zoomOut" title="縮小" aria-label="タイムライン縮小"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
@@ -495,7 +495,7 @@ let AC = null;
 const getAC = () => { if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } return AC; };
 const savePref = () => ls.set('bamiri.pref', S.pref);
 const locked = () => S.practice || isRO();
-const isRO = () => S.where === 'cloud' && !S.ekey;
+const isRO = () => (S.where === 'cloud' && !S.ekey) || S.where === 'recv';
 
 // ================= model =================
 const endOf = f => f.start + f.hold;
@@ -707,7 +707,8 @@ async function flushSave() {
 function renderSync() {
   const b = $('#syncBadge'); if (!b) return;
   let txt, on = false, act = false;
-  if (S.where !== 'cloud') txt = 'この端末に保存';
+  if (S.where === 'recv') txt = '受け取った作品（閲覧のみ）';
+  else if (S.where !== 'cloud') txt = 'この端末に保存';
   else if (isRO()) { txt = 'メンバー用（閲覧のみ）'; act = !!Keys.get(S.projId); }
   else if (S.offline) txt = 'オフライン（未保存）';
   else if (S.dirty || S.saving) txt = '保存中…';
@@ -747,10 +748,11 @@ function thumbSVG(p, f) {
 function homeItems() {
   const cloud = CLOUD ? Recent.list().map(x => { const c = Cache.get(x.id); return { id: x.id, where: 'cloud', role: Keys.get(x.id) ? 'edit' : 'view', name: (c && c.data && c.data.name) || x.name, data: c && c.data, at: x.at }; }) : [];
   const local = Local.list().map(d => ({ id: d.id, where: 'local', role: 'edit', name: d.name, data: d, at: d.updatedAt || 0 }));
-  return cloud.concat(local).sort((a, b) => (b.at || 0) - (a.at || 0));
+  const recv = Recv.list().map(x => ({ id: x.id, where: 'recv', role: 'view', name: x.data.name, data: x.data, at: x.at }));
+  return cloud.concat(local, recv).sort((a, b) => (b.at || 0) - (a.at || 0));
 }
 function renderHome() {
-  $('#homeSync').innerHTML = CLOUD ? '<span class="dot on"></span><span>リンクを送るだけでメンバーと共有できます（登録不要）</span>' : '<span class="dot"></span><span>共有の設定前です（この端末だけに保存）</span>';
+  $('#homeSync').innerHTML = CLOUD ? '<span class="dot on"></span><span>リンクを送るだけでメンバーと共有できます（登録不要）</span>' : '<span class="dot on"></span><span>「共有」からリンクを送るだけで、メンバーに届きます（登録不要）</span>';
   const list = homeItems(), el = $('#projList');
   if (!list.length) {
     el.innerHTML = `<div class="empty"><b>まだ作品がありません</b><span>「新しい作品」で人数とステージの大きさを決めて始めるか、サンプルを開いて操作を試せます。メンバーは、送られてきたリンクを開くとここに作品が並びます。</span><div class="home-actions"><button class="btn primary" data-act="newProject">＋ 新しい作品</button><button class="btn" data-act="sample">サンプルを開く</button></div></div>`;
@@ -760,7 +762,7 @@ function renderHome() {
     const p = it.data ? migrate(JSON.parse(JSON.stringify(it.data))) : null;
     const dur = p && p.forms.length ? fmtT(endOf(p.forms[p.forms.length - 1])) : '';
     const dt = new Date(it.at || Date.now());
-    const chip = it.where === 'local' ? 'この端末のみ' : it.role === 'edit' ? '編集できる' : 'メンバー用';
+    const chip = it.where === 'recv' ? '受け取った作品' : it.where === 'local' ? (CLOUD ? 'この端末のみ' : '自分の作品') : it.role === 'edit' ? '編集できる' : 'メンバー用';
     return `<article class="pcard" data-id="${esc(it.id)}" data-where="${it.where}" data-role="${it.role}">
       <button class="thumb" data-act="open" aria-label="${esc(it.name)}を開く">${p ? thumbSVG(p, p.forms[0]) : ''}</button>
       <div class="pb"><h3>${esc(it.name || '無題')}</h3>
@@ -839,7 +841,7 @@ function enterEditor(id, where, data, o) {
   closeModal();
   $('#home').hidden = true; $('#editor').hidden = false;
   if (where === 'cloud') { history.replaceState(null, '', S.ekey ? editLink(id, S.ekey) : viewLink(id)); Recent.touch(id, S.ekey ? 'edit' : 'view', P); }
-  else history.replaceState(null, '', appUrl());
+  else if (where !== 'recv') history.replaceState(null, '', appUrl());
   applyRO();
   S.practice = false; document.body.classList.remove('practice');
   rebuildAll(true);
@@ -854,7 +856,7 @@ async function goHome() {
   history.replaceState(null, '', appUrl());
   renderHome();
 }
-function applyRO() { document.body.classList.toggle('ro', isRO()); renderSync(); }
+function applyRO() { document.body.classList.toggle('ro', isRO()); document.body.classList.toggle('recv', S.where === 'recv'); renderSync(); }
 
 // ================= stage =================
 const svg = $('#stage');
@@ -1288,7 +1290,8 @@ function guessMime(name) {
   return { mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav', ogg: 'audio/ogg', webm: 'audio/webm', mp4: 'video/mp4', flac: 'audio/flac' }[ext] || 'audio/mpeg';
 }
 async function onAudioFile(file) {
-  if (!file || !P || locked()) return;
+  if (!file || !P) return;
+  if (isRO() && S.where !== 'recv') { toast('音源は編集する人が入れます'); return; }
   const mime = file.type || guessMime(file.name);
   pause();
   toast('音源を読み込み中…', 8000);
@@ -1311,6 +1314,7 @@ async function onAudioFile(file) {
       toast('音源を読み込み、メンバーと共有しました');
     } catch (e) { toast('音源のアップロードに失敗しました。この端末では使えます（通信状態を確認して、もう一度読み込んでください）', 5000); }
   } else toast('音源を読み込みました');
+  if (S.where === 'recv') saveRecv();
   scheduleSave(); if (S.tab === 'settings') renderPanel();
 }
 async function restoreAudio() {
@@ -1452,7 +1456,7 @@ function renderPanel() {
     const a = P.audio;
     body.innerHTML = `
     <div class="sec"><h4>音楽</h4>
-      <div class="rowf"><label class="btn sm edit-only" for="audioFile">${a ? '音源を変更' : '音源を読み込む'}</label><span class="hint">${a ? esc(a.name) + (S.audioReady ? '' : '（この端末で未読込）') : 'mp3・m4a・wav など'}</span></div>
+      <div class="rowf"><label class="btn sm audio-btn" for="audioFile">${a ? '音源を変更' : '音源を読み込む'}</label><span class="hint">${a ? esc(a.name) + (S.audioReady ? '' : '（この端末で未読込）') : 'mp3・m4a・wav など'}</span></div>
       ${a && !a.url && S.where === 'cloud' ? '<p class="hint">この音源はまだアップロードされていないため、メンバーには届いていません。通信できる場所で読み込み直してください。</p>' : ''}
       ${a && a.url && S.where === 'cloud' ? '<p class="hint">音源はメンバーと共有されています。</p>' : ''}
       <div class="row2"><label class="field" for="sBpm">BPM<input class="tin num" id="sBpm" type="number" min="0" max="300" step="0.5" value="${P.bpm || ''}" placeholder="なし" ${ro ? 'readonly' : ''}></label>
@@ -1477,6 +1481,7 @@ function renderPanel() {
     </div>`;
   }
   if (isRO()) body.querySelectorAll('.edit-only').forEach(el => el.remove());
+  if (isRO() && S.where !== 'recv') body.querySelectorAll('.audio-btn').forEach(el => el.remove());
   fillPhotos(body);
 }
 function renderPanelSel() {
@@ -1523,6 +1528,113 @@ $('#tabBody').addEventListener('change', e => {
 });
 $('#tabBody').addEventListener('focusout', () => { S.editing = false; });
 
+// ================= link sharing (no server: the project travels inside the link) =================
+function b64u(bytes) {
+  let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function unb64u(str) {
+  str = str.replace(/-/g, '+').replace(/_/g, '/'); while (str.length % 4) str += '=';
+  const bin = atob(str), out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out;
+}
+const pipeBytes = async (bytes, stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+async function packProject(p, t) {
+  const ids = p.dancers.map(d => d.id), q = v => Math.round(v * 100);
+  const o = {
+    v: 1, id: p.shareId, t, n: p.name || '', s: [p.stage.w, p.stage.d, p.stage.grid], b: p.bpm || 0, o: p.offset || 0, e: p.easing === 'linear' ? 1 : 0, L: p.length || 60,
+    d: p.dancers.map(d => [d.id, d.name, d.color.replace('#', '')]),
+    f: p.forms.map(f => [f.name, q(f.start), q(f.hold), f.note || '',
+      ids.flatMap(id => { const pp = f.pos[id] || [0, p.stage.d / 2]; return [q(pp[0]), q(pp[1])]; }),
+      Object.entries(f.curve || {}).filter(([id]) => ids.includes(id)).map(([id, c]) => [ids.indexOf(id), q(c[0]), q(c[1])])]),
+    a: p.audio ? [p.audio.name, p.audio.duration || 0] : 0
+  };
+  const raw = new TextEncoder().encode(JSON.stringify(o));
+  if (window.CompressionStream) { try { return 'z' + b64u(await pipeBytes(raw, new CompressionStream('deflate-raw'))); } catch (e) {} }
+  return 'j' + b64u(raw);
+}
+async function unpackProject(s) {
+  const bytes = unb64u(s.slice(1));
+  const raw = s[0] === 'z' ? await pipeBytes(bytes, new DecompressionStream('deflate-raw')) : bytes;
+  const o = JSON.parse(new TextDecoder().decode(raw));
+  const dz = o.d.map(([id, name, col]) => ({ id, name, color: '#' + col }));
+  const forms = o.f.map(([name, st, ho, note, pos, cur]) => {
+    const pp = {}, cc = {};
+    dz.forEach((d, i) => pp[d.id] = [pos[i * 2] / 100, pos[i * 2 + 1] / 100]);
+    (cur || []).forEach(([i, x, y]) => { if (dz[i]) cc[dz[i].id] = [x / 100, y / 100]; });
+    return { id: uid(), name, start: st / 100, hold: ho / 100, note, pos: pp, curve: cc, photos: [] };
+  });
+  return { id: o.id, t: o.t, data: migrate({ name: o.n, shareId: o.id, sharedAt: o.t, stage: { w: o.s[0], d: o.s[1], grid: o.s[2] }, bpm: o.b, offset: o.o, easing: o.e ? 'linear' : 'smooth', length: o.L, dancers: dz, forms, audio: o.a ? { name: o.a[0], duration: o.a[1], mime: '' } : null, createdAt: o.t, updatedAt: o.t }) };
+}
+async function shareUrl(kind) {
+  const t = S.where === 'recv' ? (P.sharedAt || Date.now()) : Date.now();
+  return `${appUrl()}#${kind}=${await packProject(P, t)}`;
+}
+// projects received through a member link (view only, kept on this device)
+const Recv = {
+  ids() { return ls.get('bamiri.rvIdx', []); },
+  get(id) { return ls.get('bamiri.rv.' + id, null); },
+  save(id, v) { ls.set('bamiri.rv.' + id, v); const ids = this.ids(); if (!ids.includes(id)) { ids.push(id); ls.set('bamiri.rvIdx', ids); } },
+  remove(id) { ls.del('bamiri.rv.' + id); ls.set('bamiri.rvIdx', this.ids().filter(x => x !== id)); },
+  list() { return this.ids().map(id => { const v = this.get(id); return v ? { id, data: v.data, at: v.openedAt || v.t } : null; }).filter(Boolean); }
+};
+function saveRecv() {
+  if (S.where !== 'recv' || !P) return;
+  const v = Recv.get(S.projId) || {};
+  Recv.save(S.projId, { data: JSON.parse(JSON.stringify(P)), t: v.t || P.sharedAt || 0, openedAt: Date.now() });
+}
+async function receiveLink(str, edit) {
+  let got;
+  try { got = await unpackProject(str); }
+  catch (e) { toast(window.DecompressionStream ? 'リンクが途中で切れているか、壊れているため開けません' : 'この端末のブラウザが古いため開けません。OSを最新にしてください', 5000); history.replaceState(null, '', appUrl()); renderHome(); return; }
+  if (edit) {
+    const data = got.data; delete data.shareId; delete data.sharedAt;
+    const id = uid(); Local.save(id, data); enterEditor(id, 'local', data, {});
+    toast('編集できるコピーをこの端末に作りました', 4000); return;
+  }
+  const id = got.id || ('x' + newId(9));
+  const prev = Recv.get(id);
+  if (prev && prev.t >= got.t) {
+    enterEditor(id, 'recv', prev.data, {});
+    if (prev.t > got.t) toast('この端末にはもっと新しい版があるため、そちらを開きました', 4000);
+    return;
+  }
+  const data = got.data;
+  if (prev && prev.data.audio && data.audio && prev.data.audio.name === data.audio.name) data.audio = prev.data.audio;
+  Recv.save(id, { data, t: got.t, openedAt: Date.now() });
+  enterEditor(id, 'recv', data, {});
+  const needAudio = data.audio && !data.audio.key;
+  toast((prev ? '最新の版に更新しました。' : '作品を受け取りました。') + (needAudio ? `音源「${data.audio.name}」を読み込むと、曲に合わせて再生できます（♪ボタン）` : 'ステージで自分をタップすると強調されます'), 6000);
+}
+// one file that carries the project plus its music and photos
+const blobToDataURL = b => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); });
+async function exportBundle() {
+  toast('ファイルを作成中…', 60000);
+  const out = { format: 'bamiri-bundle/1', project: JSON.parse(JSON.stringify(P)), audio: null, photos: {} };
+  delete out.project.shareId; delete out.project.sharedAt;
+  if (P.audio) {
+    let rec = P.audio.key ? await IDB.get(P.audio.key) : null;
+    if (!rec && P.audio.url) { try { rec = { blob: await (await fetch(P.audio.url)).blob() }; } catch (e) {} }
+    if (rec && rec.blob) out.audio = { mime: P.audio.mime || rec.blob.type, data: await blobToDataURL(rec.blob) };
+  }
+  for (const f of P.forms) for (const ph of f.photos || []) {
+    const u = await photoSrc(ph); if (!u) continue;
+    try { out.photos[ph.id] = await blobToDataURL(await (await fetch(u)).blob()); } catch (e) {}
+  }
+  offerFile(safeName(P.name) + '_まるごと.json', new Blob([JSON.stringify(out)], { type: 'application/json' }), 'json');
+}
+async function importBundle(b) {
+  const data = b.project;
+  if (b.audio && data.audio) {
+    const blob = await (await fetch(b.audio.data)).blob(), key = 'a:' + newId(12);
+    await IDB.put(key, { blob, mime: b.audio.mime }); data.audio.key = key; data.audio.mime = b.audio.mime; delete data.audio.url;
+  }
+  for (const f of data.forms || []) for (const ph of f.photos || []) {
+    const du = b.photos && b.photos[ph.id];
+    if (du) { const key = 'p:' + newId(10); await IDB.put(key, { blob: await (await fetch(du)).blob() }); ph.key = key; delete ph.url; }
+  }
+  return data;
+}
+
 // ================= share / export =================
 function linkBox(title, note, url, id) {
   const lineHref = 'https://line.me/R/share?text=' + encodeURIComponent(`${P.name || 'フォーメーション'}\n${url}`);
@@ -1530,21 +1642,28 @@ function linkBox(title, note, url, id) {
     <input class="tin" id="${id}" readonly value="${esc(url)}" aria-label="${title}">
     <div class="rowf"><button class="btn sm primary" data-act="copyLink" data-for="${id}">コピー</button><a class="btn sm" href="${esc(lineHref)}" target="_blank" rel="noopener">LINEで送る</a>${navigator.share ? `<button class="btn sm" data-act="shareLink" data-for="${id}">ほかのアプリで送る</button>` : ''}</div></div>`;
 }
-function shareModal() {
+async function shareModal() {
   let links = '';
   if (S.where === 'cloud') {
     links += linkBox('メンバー用リンク（見る・練習するだけ）', 'アカウント登録なしで開けます。立ち位置・音源・メモ・写真が見られ、練習モードで自分を強調できます。編集はできません。', viewLink(S.projId), 'lnView');
     if (S.ekey) links += linkBox('編集用リンク（一緒に編集する人だけ）', 'このリンクを知っている人は誰でも編集できます。振付担当など、編集してほしい人にだけ送ってください。', editLink(S.projId, S.ekey), 'lnEdit');
+  } else if (S.where === 'recv') {
+    links = linkBox('この作品のリンク', '受け取った作品を、ほかのメンバーにもそのまま送れます。', await shareUrl('s'), 'lnView');
   } else {
-    links = `<div class="status-box"><span class="dot"></span><span>${CLOUD ? 'この作品はこの端末だけに保存されています。下のボタンで共有できるようにすると、リンクでメンバーに送れます。' : 'まだ共有の設定がされていないため、この端末だけに保存しています。メンバーには PDF や画像を送ってください。'}</span></div>${CLOUD ? '<button class="btn primary" data-act="makeShared">この作品を共有できるようにする</button>' : ''}`;
+    if (!P.shareId) { P.shareId = newId(10); scheduleSave(); }
+    const vu = await shareUrl('s'), eu = await shareUrl('se');
+    links = linkBox('メンバー用リンク（設定・登録なし）', '立ち位置・カウント・メモがこのリンクに入っています。直したあとにもう一度送ると、メンバーの端末で新しい版に置き換わります。音源は各メンバーが最初に1回だけ読み込みます（写真はPDFで送ってください）。', vu, 'lnView')
+      + (vu.length > 6000 ? '<p class="hint">作品が大きいためリンクが長くなっています。LINEで送れないときは下の「まるごとファイル」で送ってください。</p>' : '')
+      + linkBox('編集を引き継ぐリンク', '開いた人の端末に、編集できるコピーが作られます（同時に編集する機能ではありません）。', eu, 'lnEdit');
   }
   openModal(`<h2>共有・書き出し</h2>${links}
     <div class="share-opt">
       <button class="btn" data-act="exportPDF">📕 PDFにする（一覧＋隊形ごとのページ）</button>
       <button class="btn" data-act="exportPNG">🖼 フォーメーション表を1枚の画像にする</button>
-      <button class="btn edit-only" data-act="exportJSON">📦 作品データ（.json）を書き出す</button>
+      <button class="btn edit-only" data-act="exportBundle">🎵 音源・写真ごと「まるごとファイル」で送る</button>
       <button class="btn edit-only" data-act="dupCurrent">📄 この作品を複製する</button>
     </div>
+    <p class="edit-only">まるごとファイルは、受け取った人がホーム画面の「作品データを読み込む」で開くと、音源・写真つきで編集できるコピーになります。</p>
     <div class="acts"><button class="btn" data-act="closeModal">閉じる</button></div>`);
   if (isRO()) $('#mcard').querySelectorAll('.edit-only').forEach(el => el.remove());
 }
@@ -1878,13 +1997,15 @@ function showPages(pages, msg) {
 }
 async function importFile(file) {
   try {
-    const data = JSON.parse(await file.text());
+    let data = JSON.parse(await file.text());
+    let bundle = false;
+    if (data && data.format === 'bamiri-bundle/1') { toast('読み込み中…', 20000); data = await importBundle(data); bundle = true; }
     if (!data || !Array.isArray(data.dancers) || !Array.isArray(data.forms)) throw 0;
-    delete data.format; delete data.id;
+    delete data.format; delete data.id; delete data.shareId; delete data.sharedAt;
     if (data.audio) delete data.audio.assetId;
     data.updatedAt = Date.now(); data.clientId = CLIENT;
     await createProject(migrate(data));
-    toast('作品を読み込みました' + (data.audio ? '。音源は「音源を読み込む」から入れてください' : ''));
+    toast('作品を読み込みました' + (data.audio && !data.audio.key && !data.audio.url ? '。音源は「音源を読み込む」から入れてください' : bundle ? '（音源・写真つき）' : ''), 4000);
   } catch (e) { toast('作品データとして読み込めませんでした'); }
 }
 $('#importFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) importFile(f); });
@@ -1915,10 +2036,10 @@ document.addEventListener('click', async e => {
   switch (act) {
     case 'newProject': newProjectModal(); break;
     case 'sample': createProject(sampleData(), true); break;
-    case 'open': { const { id, where, role } = card.dataset; if (where === 'local') { const d = Local.get(id); if (d) enterEditor(id, 'local', d, {}); } else openCloud(id, role === 'edit' ? 'e' : 'v'); break; }
+    case 'open': { const { id, where, role } = card.dataset; if (where === 'local') { const d = Local.get(id); if (d) enterEditor(id, 'local', d, {}); } else if (where === 'recv') { const v = Recv.get(id); if (v) enterEditor(id, 'recv', v.data, {}); } else openCloud(id, role === 'edit' ? 'e' : 'v'); break; }
     case 'dup': {
       const { id, where } = card.dataset; const d = where === 'local' ? Local.get(id) : (Cache.get(id) || {}).data;
-      if (d) { const c = JSON.parse(JSON.stringify(d)); delete c.id; c.name = (c.name || '') + ' のコピー'; createProject(migrate(c), where === 'local' && !CLOUD); } else toast('一度開いてから複製してください');
+      if (d) { const c = JSON.parse(JSON.stringify(d)); delete c.id; delete c.shareId; c.name = (c.name || '') + ' のコピー'; createProject(migrate(c), where === 'local' && !CLOUD); } else toast('一度開いてから複製してください');
       break;
     }
     case 'toCloud': { const id = card.dataset.id, d = Local.get(id); if (!d) break; const nid = await createProject(migrate(JSON.parse(JSON.stringify(d)))); if (nid) { Local.remove(id); toast('共有できるようになりました。「共有」からリンクを送れます', 4000); } break; }
@@ -1933,7 +2054,8 @@ document.addEventListener('click', async e => {
       } catch (err) { toast('削除できませんでした（通信状態を確認してください）'); }
       break;
     }
-    case 'forget': { const id = card.dataset.id; Recent.remove(id); Cache.del(id); renderHome(); break; }
+    case 'forget': { const id = card.dataset.id; if (card.dataset.where === 'recv') Recv.remove(id); else { Recent.remove(id); Cache.del(id); } renderHome(); break; }
+    case 'exportBundle': closeModal(); exportBundle(); break;
     case 'toEdit': openCloud(S.projId, 'e'); break;
     case 'copyLink': { const inp = document.getElementById(t.dataset.for); try { await navigator.clipboard.writeText(inp.value); toast('リンクをコピーしました'); } catch (err) { inp.select(); toast('選択しました。コピーしてください'); } break; }
     case 'shareLink': { const inp = document.getElementById(t.dataset.for); try { await navigator.share({ title: P.name, text: P.name, url: inp.value }); } catch (err) {} break; }
@@ -1958,7 +2080,7 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'exportJSON': closeModal(); exportJSON(); break;
-    case 'dupCurrent': { closeModal(); await flushSave(); const d = JSON.parse(JSON.stringify(P)); d.name += ' のコピー'; d.createdAt = d.updatedAt = Date.now(); createProject(d); break; }
+    case 'dupCurrent': { closeModal(); await flushSave(); const d = JSON.parse(JSON.stringify(P)); delete d.shareId; d.name += ' のコピー'; d.createdAt = d.updatedAt = Date.now(); createProject(d); break; }
     case 'copyExport': { const ta = $('#exportTxt'); try { await navigator.clipboard.writeText(ta.value); toast('コピーしました'); } catch (err) { ta.select(); toast('選択しました。コピーしてください'); } break; }
     case 'play': S.playing ? pause() : play(); break;
     case 'toStart': seek(0); tl.scrollLeft = 0; break;
@@ -2030,6 +2152,8 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) flush
 
 // ================= boot =================
 function route() {
+  const ms = location.hash.match(/^#(s|se)=([zj][A-Za-z0-9_-]+)$/);
+  if (ms) { if (P && S.where === 'recv' && ms[1] === 's' && location.hash === S.lastHash) return true; S.lastHash = location.hash; receiveLink(ms[2], ms[1] === 'se'); return true; }
   const m = location.hash.match(/^#\/(v|e)\/([a-z0-9]{6,40})(?:\/([a-z0-9]{8,80}))?/);
   if (!m) return false;
   if (P && S.projId === m[2] && ((m[1] === 'e') === !!S.ekey)) return true;
