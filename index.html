@@ -196,6 +196,15 @@ button{cursor:pointer}
 .big-photo{width:100%;max-height:65vh;object-fit:contain;border-radius:8px;background:var(--panel2)}
 .note-box{white-space:pre-wrap;background:var(--panel2);border-radius:10px;padding:12px;font-size:14px;line-height:1.7;color:var(--ink)}
 .hud .scene-btn{pointer-events:auto}
+#v3d{position:absolute;left:0;top:0;display:block;touch-action:none}
+.recbar{height:10px;border-radius:99px;background:var(--panel2);overflow:hidden}
+.recbar span{display:block;height:100%;width:0;background:var(--accent)}
+.dn{grid-column:1/-1;border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+.dn summary{cursor:pointer;font-size:12.5px;color:var(--muted);font-weight:700}
+.dnlist{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+.dnrow{display:grid;grid-template-columns:12px 64px minmax(0,1fr);gap:6px;align-items:center;font-size:12px}
+.sw-dot{width:12px;height:12px;border-radius:50%}
+.dnn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hud .btn{color:var(--ink);background:var(--panel)}
 .field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
 .field input,.field select{color:var(--ink)}
@@ -330,10 +339,12 @@ body.ro:not(.recv) .audio-btn,body.ro .tools,body.ro #btnAddForm,body.ro #btnUnd
     <div class="work">
       <div class="stage-wrap">
         <svg id="stage" xmlns="http://www.w3.org/2000/svg"></svg>
+        <canvas id="v3d" hidden></canvas>
         <div class="hud">
           <span class="fn" id="hudName"></span>
           <span class="cnt" id="hudCount" hidden></span>
           <span class="nx" id="hudNext"></span>
+          <button class="btn sm scene-btn" data-act="zoomReset" id="zoomReset" hidden>全体を表示</button>
           <button class="btn sm scene-btn" data-act="sceneInfo" id="hudScene" hidden>メモ・写真</button>
           <button class="btn sm exitp" data-act="practice">編集に戻る</button>
         </div>
@@ -394,6 +405,7 @@ body.ro:not(.recv) .audio-btn,body.ro .tools,body.ro #btnAddForm,body.ro #btnUnd
       <select id="rate" title="再生速度" aria-label="再生速度"><option value="0.5">×0.5</option><option value="0.75">×0.75</option><option value="0.9">×0.9</option><option value="1" selected>×1.0</option><option value="1.25">×1.25</option></select>
       <button class="ib tog" id="tLoop" data-act="loop" aria-pressed="false" title="今の隊形と移動をくり返す" aria-label="ループ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 014-4h12"/><path d="M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 01-4 4H4"/></svg></button>
       <button class="ib tog" id="tMetro" data-act="metro" aria-pressed="false" title="メトロノーム" aria-label="メトロノーム"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6l4 18H5z"/><path d="M12 16l5-9"/></svg></button>
+      <button class="ib tog" id="t3d" data-act="view3d" aria-pressed="false" title="客席から見た3D表示" aria-label="3D表示"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg></button>
       <button class="ib tog edit-only" id="tRipple" data-act="ripple" aria-pressed="false" title="隊形を動かすと後ろも一緒にずらす" aria-label="後ろも連動"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1"/><path d="M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg></button>
       <div class="spacer"></div>
       <span class="audio-name hide-sm" id="audioName"></span>
@@ -618,7 +630,7 @@ function sampleData() {
 function migrate(p) {
   p.stage = Object.assign({ w: 10, d: 7, grid: 0.5 }, p.stage || {});
   p.dancers = p.dancers || []; p.forms = p.forms || [];
-  p.forms.forEach(f => { f.pos = f.pos || {}; f.curve = f.curve || {}; f.note = f.note || ''; f.photos = f.photos || []; });
+  p.forms.forEach(f => { f.pos = f.pos || {}; f.curve = f.curve || {}; f.note = f.note || ''; f.photos = f.photos || []; f.dnotes = f.dnotes || {}; });
   p.bpm = +p.bpm || 0; p.offset = +p.offset || 0; p.easing = p.easing || 'smooth'; p.length = p.length || 60;
   return p;
 }
@@ -837,6 +849,7 @@ function enterEditor(id, where, data, o) {
   P = migrate(JSON.parse(JSON.stringify(data))); delete P.id;
   S.projId = id; S.where = where; S.ekey = o.ekey || null; S.ver = o.ver || 0; S.offline = !!o.offline; S.dirty = false;
   S.undo = []; S.redo = []; S.sel.clear(); S.t = 0; S.lastFi = -2;
+  PZ.k = 1; PZ.cx = PZ.cy = null;
   S.me = ls.get('bamiri.me.' + id, null);
   closeModal();
   $('#home').hidden = true; $('#editor').hidden = false;
@@ -867,7 +880,7 @@ function svgPt(e) { const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.
 function buildStage() {
   const { w, d, grid } = P.stage, W = 1.6, M = 0.6, A = 1.4;
   const x0 = -w / 2 - W, vw = w + 2 * W, y0 = S.pref.flip ? -A : -M, vh = d + M + A;
-  svg.setAttribute('viewBox', `${x0} ${y0} ${vw} ${vh}`);
+  S.vb = [x0, y0, vw, vh]; applyView();
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
   let h = `<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="context-stroke"/></marker></defs>`;
   h += `<rect class="wing" x="${x0}" y="${y0}" width="${vw}" height="${vh}"/>`;
@@ -942,6 +955,7 @@ function updateFrame() {
     el.classList.toggle('dim', !!(S.practice && S.me && S.me !== d.id));
   }
   drawOverlays(fr);
+  if (S.v3d) render3DView();
   // HUD
   const F = P.forms;
   let nm = '', nx = '';
@@ -950,12 +964,13 @@ function updateFrame() {
       const f = F[fr.i], B = F[fr.i + 1]; nm = `${fr.i + 1}. ${f.name}`;
       if (B) { const rem = endOf(f) - S.t; nx = rem > 0 ? `移動まで ${rem.toFixed(1)}s → ${B.name}` : `→ ${B.name}`; }
       if (S.practice && f.note) nx = (nx ? nx + '　' : '') + '📝 ' + f.note;
+      if (S.practice && S.me && f.dnotes && f.dnotes[S.me]) nx = (nx ? nx + '　' : '') + '👤 ' + f.dnotes[S.me];
     } else { const B = F[fr.i + 1]; nm = `${F[fr.i].name} → ${B.name}`; nx = `到着まで ${(B.start - S.t).toFixed(1)}s`; }
   } else nm = '隊形がありません';
   $('#hudName').textContent = nm; $('#hudNext').textContent = nx;
   const cnt = countAt(S.t); const hc = $('#hudCount'); hc.hidden = !cnt; hc.textContent = cnt;
   const sf = fr && fr.mode === 'form' ? F[fr.i] : null;
-  $('#hudScene').hidden = !(S.practice && sf && (sf.note || (sf.photos && sf.photos.length)));
+  $('#hudScene').hidden = !(S.practice && sf && (sf.note || (sf.photos && sf.photos.length) || (sf.dnotes && Object.keys(sf.dnotes).length)));
   $('#tcode').textContent = fmtT(S.t); $('#tcount').textContent = cnt ? cnt + 'ct' : '';
   const ph = $('#ph'); if (ph) ph.style.left = (S.t * S.pps) + 'px';
   const fi = fr && fr.mode === 'form' ? fr.i : -1;
@@ -973,6 +988,12 @@ function editForm() { return S.fr && S.fr.mode === 'form' ? P.forms[S.fr.i] : nu
 let transWarned = 0;
 svg.addEventListener('pointerdown', e => {
   if (!P) return;
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (ptrs.size >= 2) {
+    const mq = svg.querySelector('#marq'); if (mq) mq.hidden = true;
+    if (S.drag && S.drag.moved) scheduleSave();
+    S.drag = null; if (ptrs.size === 2) startPinch(); return;
+  }
   const p = svgPt(e);
   const handle = e.target.closest('.handle');
   const g = e.target.closest('.dancer');
@@ -999,6 +1020,8 @@ svg.addEventListener('pointerdown', e => {
   svg.setPointerCapture(e.pointerId);
 });
 svg.addEventListener('pointermove', e => {
+  if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (S.pinch) { movePinch(); return; }
   const D = S.drag; if (!D) return;
   const p = svgPt(e);
   if (D.type === 'dancer') {
@@ -1030,7 +1053,9 @@ svg.addEventListener('pointermove', e => {
     S.sel = s; updateFrame();
   }
 });
-function endStageDrag() {
+function endStageDrag(e) {
+  if (e) ptrs.delete(e.pointerId);
+  if (S.pinch) { if (ptrs.size < 2) S.pinch = null; return; }
   const D = S.drag; if (!D) return; S.drag = null;
   const mq = svg.querySelector('#marq'); if (mq) mq.hidden = true;
   if ((D.type === 'dancer' || D.type === 'curve') && D.moved) { scheduleSave(); renderTimelineLight(); if (S.tab === 'forms') renderPanel(); }
@@ -1071,6 +1096,209 @@ function arrange(kind) {
   for (const id in out) f.pos[id] = clampPos(out[id]);
   updateFrame(); scheduleSave(); renderTimelineLight(); if (S.tab === 'forms') renderPanel();
 }
+
+// ================= stage zoom (pinch / ctrl+wheel) =================
+const PZ = { k: 1, cx: null, cy: null };
+const ptrs = new Map();
+function applyView() {
+  const b = S.vb; if (!b) return;
+  const k = PZ.k, w = b[2] / k, h = b[3] / k;
+  let cx = PZ.cx == null ? b[0] + b[2] / 2 : PZ.cx, cy = PZ.cy == null ? b[1] + b[3] / 2 : PZ.cy;
+  cx = clamp(cx, b[0] + w / 2, b[0] + b[2] - w / 2); cy = clamp(cy, b[1] + h / 2, b[1] + b[3] - h / 2);
+  PZ.cx = cx; PZ.cy = cy;
+  svg.setAttribute('viewBox', `${cx - w / 2} ${cy - h / 2} ${w} ${h}`);
+  const zr = $('#zoomReset'); if (zr) zr.hidden = k <= 1.01;
+}
+function resetZoom() { PZ.k = 1; PZ.cx = PZ.cy = null; applyView(); }
+function svgAt(x, y) { return svgPt({ clientX: x, clientY: y }); }
+function zoomAround(k, sx, sy) {
+  const before = svgAt(sx, sy);
+  PZ.k = clamp(k, 1, 6); applyView();
+  const after = svgAt(sx, sy);
+  PZ.cx += before.x - after.x; PZ.cy += before.y - after.y; applyView();
+}
+function startPinch() {
+  const [a, b] = [...ptrs.values()];
+  S.pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, k0: PZ.k, m0: svgAt((a.x + b.x) / 2, (a.y + b.y) / 2) };
+}
+function movePinch() {
+  const [a, b] = [...ptrs.values()]; if (!b) return;
+  const d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+  PZ.k = clamp(S.pinch.k0 * d / S.pinch.d0, 1, 6); applyView();
+  const p1 = svgAt(mx, my);
+  PZ.cx += S.pinch.m0.x - p1.x; PZ.cy += S.pinch.m0.y - p1.y; applyView();
+}
+svg.addEventListener('wheel', e => {
+  if (!P) return;
+  if (e.ctrlKey || e.metaKey) { e.preventDefault(); zoomAround(PZ.k * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY); }
+  else if (PZ.k > 1.01) { e.preventDefault(); const r = svg.getBoundingClientRect(), u = (S.vb[2] / PZ.k) / r.width; PZ.cx += e.deltaX * u; PZ.cy += e.deltaY * u; applyView(); }
+}, { passive: false });
+
+// ================= 3D view (seen from the audience, or from upstage when flipped) =================
+function draw3D(c, W, H, pos, o) {
+  o = o || {};
+  const { w, d } = P.stage, back = !!o.fromBack, wing = 1.5;
+  const D0 = Math.max(3.5, w * 0.45), Hc = Math.max(2.6, d * 0.42);
+  const cam = back ? [0, d + D0, Hc] : [0, -D0, Hc], tgt = [0, d * 0.45, 0.6];
+  let fx = tgt[0] - cam[0], fy = tgt[1] - cam[1], fz = tgt[2] - cam[2]; const fl = Math.hypot(fx, fy, fz); fx /= fl; fy /= fl; fz /= fl;
+  let rx = fy, ry = -fx; const rl = Math.hypot(rx, ry); rx /= rl; ry /= rl;
+  const ux = ry * fz, uy = -rx * fz, uz = rx * fy - ry * fx;
+  const prj = (x, y, z) => { const px = x - cam[0], py = y - cam[1], pz = z - cam[2]; const zc = px * fx + py * fy + pz * fz; return [(px * rx + py * ry) / zc, (px * ux + py * uy + pz * uz) / zc, zc]; };
+  let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+  for (const x of [-w / 2 - wing, w / 2 + wing]) for (const y of [0, d]) for (const z of [0, 1.8]) { const q = prj(x, y, z); minX = Math.min(minX, q[0]); maxX = Math.max(maxX, q[0]); minY = Math.min(minY, q[1]); maxY = Math.max(maxY, q[1]); }
+  const f = Math.min(W * 0.94 / (maxX - minX), H * 0.8 / (maxY - minY));
+  const ox = W / 2 - (minX + maxX) / 2 * f, oy = H * 0.56 + (minY + maxY) / 2 * f;
+  const S2 = (x, y, z) => { const q = prj(x, y, z); return [ox + q[0] * f, oy - q[1] * f, q[2]]; };
+  const poly = (pts, fill, stroke) => { c.beginPath(); pts.forEach((p, i) => { const s = S2(p[0], p[1], p[2] || 0); i ? c.lineTo(s[0], s[1]) : c.moveTo(s[0], s[1]); }); c.closePath(); if (fill) { c.fillStyle = fill; c.fill(); } if (stroke) { c.strokeStyle = stroke; c.stroke(); } };
+  const line = (a, b, col, lw, dash) => { const p = S2(a[0], a[1], a[2] || 0), q = S2(b[0], b[1], b[2] || 0); c.strokeStyle = col; c.lineWidth = lw; c.setLineDash(dash || []); c.beginPath(); c.moveTo(p[0], p[1]); c.lineTo(q[0], q[1]); c.stroke(); c.setLineDash([]); };
+  const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#0B0D12'); g.addColorStop(1, '#171A22');
+  c.fillStyle = g; c.fillRect(0, 0, W, H);
+  const yb = back ? 0 : d; // backdrop sits at the far edge
+  poly([[-w / 2 - wing, yb, 0], [w / 2 + wing, yb, 0], [w / 2 + wing, yb, 4], [-w / 2 - wing, yb, 4]], '#1C2029');
+  poly([[-w / 2 - wing, 0], [-w / 2, 0], [-w / 2, d], [-w / 2 - wing, d]], '#111318');
+  poly([[w / 2, 0], [w / 2 + wing, 0], [w / 2 + wing, d], [w / 2, d]], '#111318');
+  poly([[-w / 2, 0], [w / 2, 0], [w / 2, d], [-w / 2, d]], '#262A35');
+  for (let x = Math.ceil(-w / 2); x <= w / 2; x++) line([x, 0], [x, d], 'rgba(255,255,255,.08)', 1);
+  for (let y = 1; y < d; y++) line([-w / 2, y], [w / 2, y], 'rgba(255,255,255,.08)', 1);
+  line([0, 0], [0, d], '#F2C230', 1.5, [6, 4]);
+  line([-w / 2, 0], [w / 2, 0], '#EF5F7A', 2.5);
+  c.font = `${Math.max(9, Math.round(f * 0.018))}px ${CNUM}`; c.fillStyle = '#7D8597'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  for (let x = Math.ceil(-w / 2); x <= w / 2; x++) { const s = S2(x, back ? d + 0.35 : -0.35, 0); c.fillText(String(Math.abs(x)), s[0], s[1]); }
+  const list = P.dancers.filter(dc => pos[dc.id]).map(dc => { const p = pos[dc.id]; return { dc, p, z: S2(p[0], p[1], 0)[2] }; }).sort((a, b) => b.z - a.z);
+  for (const { dc, p } of list) {
+    const base = S2(p[0], p[1], 0), s = f / base[2];
+    const yAt = z => S2(p[0], p[1], z)[1];
+    const dim = o.dim && o.me && o.me !== dc.id;
+    c.globalAlpha = dim ? 0.28 : 1;
+    c.fillStyle = 'rgba(0,0,0,.45)'; c.beginPath(); c.ellipse(base[0], base[1], .34 * s, .34 * s * .32, 0, 0, Math.PI * 2); c.fill();
+    const top = yAt(1.3), bot = yAt(0.06), bw = .21 * s;
+    c.fillStyle = dc.color; c.beginPath();
+    if (c.roundRect) c.roundRect(base[0] - bw, top, bw * 2, bot - top, bw * .9); else c.rect(base[0] - bw, top, bw * 2, bot - top);
+    c.fill(); c.strokeStyle = 'rgba(0,0,0,.35)'; c.lineWidth = 1; c.stroke();
+    const hy = yAt(1.48), hr = .14 * s;
+    c.beginPath(); c.arc(base[0], hy, hr, 0, Math.PI * 2); c.fill(); c.stroke();
+    if (o.me === dc.id) { c.strokeStyle = '#F2C230'; c.lineWidth = Math.max(2, s * .04); c.beginPath(); c.ellipse(base[0], base[1], .46 * s, .46 * s * .32, 0, 0, Math.PI * 2); c.stroke(); }
+    c.fillStyle = inkFor(dc.color); c.font = `bold ${Math.max(8, Math.round(s * ([...short(dc.name)].length > 2 ? .13 : .17)))}px ${CUI}`;
+    c.fillText(short(dc.name), base[0], yAt(0.85));
+    c.globalAlpha = 1;
+  }
+  c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+}
+function render3DView() {
+  const cv = $('#v3d'); if (!cv) return;
+  if (!S.v3d || !P) { cv.hidden = true; return; }
+  cv.hidden = false;
+  const w = svg.clientWidth, h = svg.clientHeight, dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (!w || !h) return;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.width = w + 'px'; cv.style.height = h + 'px'; }
+  const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw3D(c, w, h, S.pos, { me: S.me, dim: S.practice, fromBack: S.pref.flip });
+}
+window.addEventListener('resize', () => { if (S.v3d) render3DView(); });
+
+// ================= practice video (canvas + music, recorded in real time) =================
+function drawVideoFrame(c, W, H, t, mode) {
+  const F = P.forms, fr = frameAt(t), pos = positionsAt(fr);
+  if (mode === '3d') draw3D(c, W, H, pos, { me: S.me, dim: !!S.me, fromBack: S.pref.flip });
+  else {
+    c.fillStyle = '#14161C'; c.fillRect(0, 0, W, H);
+    const nx = fr && fr.mode === 'form' ? F[fr.i + 1] : null;
+    drawStageCanvas(c, { pos }, nx, 40, 104, W - 80, H - 124, true, S.me);
+  }
+  c.fillStyle = 'rgba(10,12,16,.72)'; c.fillRect(0, 0, W, 86);
+  c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+  let nm = '', sub = '';
+  if (fr) {
+    if (fr.mode === 'form') { const f = F[fr.i], B = F[fr.i + 1]; nm = `${fr.i + 1}. ${f.name}`; if (B) sub = `移動まで ${Math.max(0, endOf(f) - t).toFixed(1)}s → ${B.name}`; const mn = S.me && f.dnotes && f.dnotes[S.me]; if (mn) sub += (sub ? '　' : '') + '👤 ' + mn; }
+    else { const B = F[fr.i + 1]; nm = `${F[fr.i].name} → ${B.name}`; sub = `到着まで ${(B.start - t).toFixed(1)}s`; }
+  }
+  c.fillStyle = '#FFFFFF'; c.font = `bold 34px ${CUI}`; c.fillText(nm, 28, 46);
+  c.fillStyle = '#B9C0D0'; c.font = `20px ${CUI}`; c.fillText(sub, 28, 74);
+  c.textAlign = 'right'; c.fillStyle = '#F2C230'; c.font = `600 40px ${CNUM}`;
+  const cnt = countAt(t); c.fillText(cnt || fmtT(t), W - 28, 52);
+  if (cnt) { c.fillStyle = '#8F97A9'; c.font = `18px ${CNUM}`; c.fillText(fmtT(t), W - 28, 76); }
+  c.textAlign = 'left';
+  c.fillStyle = 'rgba(255,255,255,.12)'; c.fillRect(0, H - 6, W, 6);
+  c.fillStyle = '#F2C230'; c.fillRect(0, H - 6, W * clamp(t / timelineDur(), 0, 1), 6);
+}
+function videoModal() {
+  const me = S.me && P.dancers.find(d => d.id === S.me);
+  const ok = !!(HTMLCanvasElement.prototype.captureStream && window.MediaRecorder);
+  openModal(`<h2>練習動画を作る</h2>
+    <p>立ち位置の動きを、曲つきの動画にします。再生しながら録画するので、曲の長さと同じ時間がかかります。作成中は画面を開いたままにしてください。</p>
+    <div class="row2"><label class="field" for="vMode">見え方<select class="tin" id="vMode"><option value="top">上から（立ち位置図）</option><option value="3d">客席から（3D）</option></select></label>
+    <label class="field" for="vFrom">範囲<select class="tin" id="vFrom"><option value="all">最初から最後まで</option><option value="cur">今の隊形から</option></select></label></div>
+    <p>${me ? `★「${esc(me.name)}」を強調した動画になります。` : '自分を強調したいときは、先にダンサー一覧の★か練習モードで自分を選んでください。'}${S.audioReady ? '' : '　音源が読み込まれていないため、音なしの動画になります。'}</p>
+    ${ok ? '' : '<p>この端末のブラウザは動画の作成に対応していません。</p>'}
+    <div class="acts"><button class="btn" data-act="closeModal">やめる</button>${ok ? '<button class="btn primary" data-act="startVideo">作成開始</button>' : ''}</div>`);
+}
+async function recordVideo(mode, from) {
+  pause();
+  const W = 1280, H = 720, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const c = cv.getContext('2d');
+  await ensureFonts();
+  const stream = cv.captureStream(30);
+  let el = null;
+  if (S.audioReady && S.audioUrl) {
+    try {
+      const ac = getAC(); if (ac.state === 'suspended') await ac.resume();
+      el = new Audio(S.audioUrl); el.preload = 'auto';
+      const src = ac.createMediaElementSource(el), dest = ac.createMediaStreamDestination();
+      src.connect(dest); src.connect(ac.destination);
+      dest.stream.getAudioTracks().forEach(tr => stream.addTrack(tr));
+    } catch (e) { el = null; }
+  }
+  const types = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  const mime = types.find(ty => { try { return MediaRecorder.isTypeSupported(ty); } catch (e) { return false; } }) || '';
+  let rec;
+  try { rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 2500000 } : undefined); }
+  catch (e) { toast('この端末では動画を作れませんでした'); return; }
+  const chunks = []; rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  const stopped = new Promise(r => rec.onstop = r);
+  const t0 = from, end = timelineDur();
+  let stop = false, wake = null;
+  try { wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+  openModal(`<h2>練習動画を作成中…</h2><p>画面を開いたままお待ちください。途中で止めると、そこまでの動画を保存できます。</p>
+    <div class="recbar"><span id="recFill"></span></div><p class="num" id="recTime">0:00.0 / ${fmtT(end)}</p>
+    <div class="acts"><button class="btn primary" data-act="recStop">ここまでで保存</button></div>`);
+  S.recStop = () => { stop = true; };
+  drawVideoFrame(c, W, H, t0, mode);
+  rec.start(1000);
+  const p0 = performance.now();
+  if (el) { try { el.currentTime = t0; await el.play(); } catch (e) {} }
+  const clock = () => { const pc = t0 + (performance.now() - p0) / 1000; return el && !el.paused && !el.ended ? el.currentTime : pc; };
+  await new Promise(resolve => {
+    const step = () => {
+      if (stop) return resolve();
+      const t = clock(); if (t >= end) return resolve();
+      drawVideoFrame(c, W, H, t, mode);
+      const fill = $('#recFill'); if (fill) fill.style.width = (100 * (t - t0) / Math.max(0.1, end - t0)) + '%';
+      const tt = $('#recTime'); if (tt) tt.textContent = `${fmtT(t)} / ${fmtT(end)}`;
+      setTimeout(step, 33);
+    };
+    setTimeout(step, 33);
+  });
+  S.recStop = null;
+  if (el) el.pause();
+  rec.stop(); await stopped;
+  stream.getTracks().forEach(tr => tr.stop());
+  try { wake && wake.release(); } catch (e) {}
+  const type = (mime || 'video/webm').split(';')[0];
+  const blob = new Blob(chunks, { type });
+  if (!blob.size) { closeModal(); toast('動画を作れませんでした'); return; }
+  offerFile(`${safeName(P.name)}_練習動画.${type.includes('mp4') ? 'mp4' : 'webm'}`, blob, 'video');
+}
+
+// ================= counts (8-count notation) =================
+function parseCount(str) {
+  const m = String(str).trim().match(/^(\d+)\s*[-ー−の.]\s*(\d+)$/);
+  let idx;
+  if (m) idx = (parseInt(m[1]) - 1) * 8 + (clamp(parseInt(m[2]), 1, 8) - 1);
+  else if (/^\d+$/.test(String(str).trim())) idx = (parseInt(str) - 1) * 8;
+  else return null;
+  return (P.offset || 0) + Math.max(0, idx) * beatLen();
+}
+const holdCounts = f => Math.round(f.hold / beatLen() * 2) / 2;
 
 // ================= timeline =================
 const tl = $('#tl'), tlInner = $('#tlInner'), tlCanvas = $('#tlCanvas');
@@ -1439,13 +1667,15 @@ function renderPanel() {
       return `<li class="fitem ${on ? 'on' : ''}" data-i="${i}">
         <div class="top" data-act="gotoForm"><div class="th">${thumbSVG(P, f)}</div>
         <div class="info"><span class="nm">${i + 1}. ${esc(f.name)}</span>
-        <span class="tm num">${fmtT(f.start)} – ${fmtT(endOf(f))}${P.bpm ? ' · ' + countAt(f.start + 1e-4) + 'ct' : ''}${nx ? ' · 移動 ' + (nx.start - endOf(f)).toFixed(1) + 's' : ''}</span>
+        <span class="tm num">${fmtT(f.start)} – ${fmtT(endOf(f))}${P.bpm ? ' · ' + countAt(f.start + 1e-4) + 'ct' : ''}${nx ? ' · 移動 ' + (nx.start - endOf(f)).toFixed(1) + 's' + (P.bpm ? '（' + Math.round((nx.start - endOf(f)) / beatLen() * 2) / 2 + 'ct）' : '') : ''}</span>
         ${f.note && !on ? `<span class="tm">📝 ${esc(f.note)}</span>` : ''}${f.photos && f.photos.length && !on ? `<span class="tm">📷 写真${f.photos.length}枚</span>` : ''}</div></div>
         ${on ? `<div class="ed">
           <label class="field" style="grid-column:1/-1">名前<input class="tin" data-ff="name" value="${esc(f.name)}" ${ro ? 'readonly' : ''}></label>
           <label class="field">開始 (秒)<input class="tin num" type="number" step="0.1" min="0" data-ff="start" value="${f.start}" ${ro ? 'readonly' : ''}></label>
           <label class="field">長さ (秒)<input class="tin num" type="number" step="0.1" min="0.2" data-ff="hold" value="${f.hold}" ${ro ? 'readonly' : ''}></label>
+          ${P.bpm ? `<label class="field">開始（カウント）<input class="tin num" data-ff="startc" value="${countAt(f.start + 1e-4)}" placeholder="例 3-5" ${ro ? 'readonly' : ''}></label><label class="field">長さ（カウント）<input class="tin num" type="number" inputmode="decimal" step="0.5" min="0.5" data-ff="holdc" value="${holdCounts(f)}" ${ro ? 'readonly' : ''}></label>` : ''}
           <textarea class="tin" data-ff="note" placeholder="このシーンのメモ（振り・立ち位置・きっかけの注意など）" ${ro ? 'readonly' : ''}>${esc(f.note)}</textarea>
+          <details class="dn" ${S.dnOpen ? 'open' : ''}><summary>個人メモ（${Object.keys(f.dnotes || {}).length}人）</summary><div class="dnlist">${P.dancers.filter(d => !ro || (f.dnotes || {})[d.id]).map(d => `<label class="dnrow"><span class="sw-dot" style="background:${d.color}"></span><span class="dnn">${esc(d.name)}</span><input class="tin" data-dn="${d.id}" value="${esc((f.dnotes || {})[d.id] || '')}" placeholder="例：3カウント目でターン" ${ro ? 'readonly' : ''}></label>`).join('')}${ro && !Object.keys(f.dnotes || {}).length ? '<span class="hint">なし</span>' : ''}</div></details>
           <div class="photos">${(f.photos || []).map(ph => `<button class="pth" data-act="viewPhoto" data-ph="${ph.id}" aria-label="写真を見る"><img data-ph="${ph.id}" alt=""></button>`).join('')}${ro ? '' : '<label class="pth add" for="photoFile">＋写真</label>'}</div>
         </div>
         <div class="acts edit-only"><button class="btn sm" data-act="dupForm">複製</button><button class="btn sm" data-act="clearCurves">経路を直線に</button><button class="btn sm danger" data-act="delForm">${pendingDel === f.id ? '本当に削除' : '削除'}</button></div>` : ''}
@@ -1489,6 +1719,13 @@ function renderPanelSel() {
 }
 $('#tabBody').addEventListener('input', e => {
   const t = e.target; if (!P || isRO()) return;
+  if (t.dataset.dn) {
+    const f = P.forms[+t.closest('.fitem').dataset.i]; if (!f) return;
+    if (!S.editing) { checkpoint(); S.editing = true; }
+    f.dnotes = f.dnotes || {}; if (t.value.trim()) f.dnotes[t.dataset.dn] = t.value; else delete f.dnotes[t.dataset.dn];
+    const sm = t.closest('.dn').querySelector('summary'); if (sm) sm.textContent = `個人メモ（${Object.keys(f.dnotes).length}人）`;
+    scheduleSave(); return;
+  }
   const li = t.closest('.dlist li');
   if (li && t.dataset.f) {
     const d = P.dancers.find(x => x.id === li.dataset.id); if (!d) return;
@@ -1507,10 +1744,13 @@ $('#tabBody').addEventListener('change', e => {
   if (t.dataset.pref) { S.pref[t.dataset.pref] = t.checked; savePref(); buildStage(); updateFrame(); renderTimeline(); return; }
   if (isRO()) return;
   const fl = t.closest('.fitem');
-  if (fl && (t.dataset.ff === 'start' || t.dataset.ff === 'hold')) {
-    const f = P.forms[+fl.dataset.i]; const v = parseFloat(t.value); if (isNaN(v)) return;
+  if (fl && ['start', 'hold', 'startc', 'holdc'].includes(t.dataset.ff)) {
+    const f = P.forms[+fl.dataset.i], ff = t.dataset.ff;
+    let v = ff === 'startc' ? parseCount(t.value) : parseFloat(t.value);
+    if (v == null || isNaN(v)) { if (ff === 'startc') toast('「3-5」のように「8カウントの番号-拍」で入力してください'); return; }
+    if (ff === 'holdc') v = v * beatLen();
     checkpoint();
-    if (t.dataset.ff === 'start') f.start = r2(Math.max(0, v)); else f.hold = r2(Math.max(0.2, v));
+    if (ff === 'start' || ff === 'startc') f.start = r2(Math.max(0, v)); else f.hold = r2(Math.max(0.2, v));
     fixOverlaps(); rebuildAll(false); seek(f.start + 0.01); scheduleSave(); return;
   }
   const id = t.id;
@@ -1527,6 +1767,7 @@ $('#tabBody').addEventListener('change', e => {
   }
 });
 $('#tabBody').addEventListener('focusout', () => { S.editing = false; });
+$('#tabBody').addEventListener('toggle', e => { if (e.target.classList && e.target.classList.contains('dn')) S.dnOpen = e.target.open; }, true);
 
 // ================= link sharing (no server: the project travels inside the link) =================
 function b64u(bytes) {
@@ -1545,7 +1786,8 @@ async function packProject(p, t) {
     d: p.dancers.map(d => [d.id, d.name, d.color.replace('#', '')]),
     f: p.forms.map(f => [f.name, q(f.start), q(f.hold), f.note || '',
       ids.flatMap(id => { const pp = f.pos[id] || [0, p.stage.d / 2]; return [q(pp[0]), q(pp[1])]; }),
-      Object.entries(f.curve || {}).filter(([id]) => ids.includes(id)).map(([id, c]) => [ids.indexOf(id), q(c[0]), q(c[1])])]),
+      Object.entries(f.curve || {}).filter(([id]) => ids.includes(id)).map(([id, c]) => [ids.indexOf(id), q(c[0]), q(c[1])]),
+      Object.entries(f.dnotes || {}).filter(([id, v]) => ids.includes(id) && v).map(([id, v]) => [ids.indexOf(id), v])]),
     a: p.audio ? [p.audio.name, p.audio.duration || 0] : 0
   };
   const raw = new TextEncoder().encode(JSON.stringify(o));
@@ -1557,11 +1799,12 @@ async function unpackProject(s) {
   const raw = s[0] === 'z' ? await pipeBytes(bytes, new DecompressionStream('deflate-raw')) : bytes;
   const o = JSON.parse(new TextDecoder().decode(raw));
   const dz = o.d.map(([id, name, col]) => ({ id, name, color: '#' + col }));
-  const forms = o.f.map(([name, st, ho, note, pos, cur]) => {
-    const pp = {}, cc = {};
+  const forms = o.f.map(([name, st, ho, note, pos, cur, dn]) => {
+    const pp = {}, cc = {}, dd = {};
+    (dn || []).forEach(([i, v]) => { if (dz[i]) dd[dz[i].id] = v; });
     dz.forEach((d, i) => pp[d.id] = [pos[i * 2] / 100, pos[i * 2 + 1] / 100]);
     (cur || []).forEach(([i, x, y]) => { if (dz[i]) cc[dz[i].id] = [x / 100, y / 100]; });
-    return { id: uid(), name, start: st / 100, hold: ho / 100, note, pos: pp, curve: cc, photos: [] };
+    return { id: uid(), name, start: st / 100, hold: ho / 100, note, pos: pp, curve: cc, photos: [], dnotes: dd };
   });
   return { id: o.id, t: o.t, data: migrate({ name: o.n, shareId: o.id, sharedAt: o.t, stage: { w: o.s[0], d: o.s[1], grid: o.s[2] }, bpm: o.b, offset: o.o, easing: o.e ? 'linear' : 'smooth', length: o.L, dancers: dz, forms, audio: o.a ? { name: o.a[0], duration: o.a[1], mime: '' } : null, createdAt: o.t, updatedAt: o.t }) };
 }
@@ -1659,6 +1902,7 @@ async function shareModal() {
   openModal(`<h2>共有・書き出し</h2>${links}
     <div class="share-opt">
       <button class="btn" data-act="exportPDF">📕 PDFにする（一覧＋隊形ごとのページ）</button>
+      <button class="btn" data-act="videoModal">🎬 練習動画を作る（音つき・LINEで送れる）</button>
       <button class="btn" data-act="exportPNG">🖼 フォーメーション表を1枚の画像にする</button>
       <button class="btn edit-only" data-act="exportBundle">🎵 音源・写真ごと「まるごとファイル」で送る</button>
       <button class="btn edit-only" data-act="dupCurrent">📄 この作品を複製する</button>
@@ -1672,8 +1916,8 @@ function offerFile(filename, blob, kind) {
   $('#toast').hidden = true;
   pendingFile = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
   let canShare = false; try { canShare = !!(navigator.canShare && navigator.canShare({ files: [pendingFile] })); } catch (e) {}
-  const title = kind === 'pdf' ? 'PDFができました' : kind === 'image' ? '画像ができました' : '作品データを書き出しました';
-  const preview = kind === 'image' ? `<img class="export-img" src="${URL.createObjectURL(blob)}" alt="フォーメーション表">` : '';
+  const title = kind === 'video' ? '練習動画ができました' : kind === 'pdf' ? 'PDFができました' : kind === 'image' ? '画像ができました' : '作品データを書き出しました';
+  const preview = kind === 'image' ? `<img class="export-img" src="${URL.createObjectURL(blob)}" alt="フォーメーション表">` : kind === 'video' ? `<video class="export-img" src="${URL.createObjectURL(blob)}" controls playsinline></video>` : '';
   openModal(`<h2>${title}</h2>${preview}<p>${esc(filename)}（${Math.max(1, Math.round(blob.size / 1024))}KB）</p>
     <div class="acts">${canShare ? '<button class="btn primary" data-act="shareFile">LINEなどで送る</button>' : ''}<button class="btn ${canShare ? '' : 'primary'}" data-act="saveFile">端末に保存</button><button class="btn" data-act="closeModal">閉じる</button></div>`);
 }
@@ -1695,7 +1939,7 @@ function posLabel(p) {
   return `${x}${side}・前から${p[1].toFixed(p[1] % 1 ? 1 : 0)}m`;
 }
 // draws one formation (audience view) into a box; returns the height used
-function drawStageCanvas(c, f, nx, X, Y, Wb, Hb, names) {
+function drawStageCanvas(c, f, nx, X, Y, Wb, Hb, names, me) {
   const { w, d } = P.stage, foot = 40;
   const sc = Math.min(Wb / (w + 3), (Hb - foot) / d);
   const fw = w * sc, fh = d * sc, fx = X + (Wb - fw) / 2, fy = Y;
@@ -1727,6 +1971,8 @@ function drawStageCanvas(c, f, nx, X, Y, Wb, Hb, names) {
   for (const dc of P.dancers) {
     const p = f.pos[dc.id]; if (!p) continue;
     const cx = toX(p[0]), cy = toY(p[1]);
+    c.globalAlpha = me && me !== dc.id ? 0.3 : 1;
+    if (me === dc.id) { c.strokeStyle = '#F2C230'; c.lineWidth = Math.max(3, r * .25); c.beginPath(); c.arc(cx, cy, r * 1.35, 0, Math.PI * 2); c.stroke(); }
     c.fillStyle = dc.color; c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
     c.strokeStyle = 'rgba(0,0,0,.35)'; c.lineWidth = 1; c.stroke();
     c.fillStyle = inkFor(dc.color); c.font = `bold ${Math.round(r * ([...short(dc.name)].length > 2 ? .62 : [...short(dc.name)].length > 1 ? .8 : 1))}px ${CUI}`;
@@ -1848,6 +2094,7 @@ async function sceneInfo() {
   const urls = await Promise.all((f.photos || []).map(photoSrc));
   openModal(`<h2>${S.fr.i + 1}. ${esc(f.name)}</h2><p class="num">${fmtT(f.start)} – ${fmtT(endOf(f))}${P.bpm ? '　' + countAt(f.start + 1e-4) + 'ct から' : ''}</p>
     ${f.note ? `<div class="note-box">${esc(f.note)}</div>` : ''}
+    ${Object.keys(f.dnotes || {}).length ? `<div class="note-box">${P.dancers.filter(d => f.dnotes[d.id]).map(d => `<div${d.id === S.me ? ' style="font-weight:700"' : ''}>👤 ${esc(d.name)}：${esc(f.dnotes[d.id])}</div>`).join('')}</div>` : ''}
     ${urls.length ? `<div class="scene-photos">${urls.map((u, i) => u ? `<img src="${esc(u)}" alt="写真${i + 1}" data-act="viewPhoto" data-ph="${esc(f.photos[i].id)}">` : '').join('')}</div>` : ''}
     <div class="acts"><button class="btn" data-act="closeModal">閉じる</button></div>`);
 }
@@ -1943,6 +2190,12 @@ async function buildPdfPages() {
     if (f.note) { const lines = wrapLines(c, f.note, RW).slice(0, 10); for (const ln of lines) { c.fillText(ln, RX, y); y += 38; } }
     else { c.fillStyle = '#A0A6B2'; c.fillText('なし', RX, y); y += 38; }
     y += 10;
+    const dns = P.dancers.filter(dc => f.dnotes && f.dnotes[dc.id]);
+    if (dns.length) {
+      c.fillStyle = '#5B6474'; c.font = `bold 22px ${CUI}`; c.fillText('個人メモ', RX, y + 14); y += 46; c.font = `21px ${CUI}`;
+      for (const dc of dns.slice(0, 10)) { c.fillStyle = dc.color; c.beginPath(); c.arc(RX + 8, y - 7, 8, 0, Math.PI * 2); c.fill(); c.fillStyle = '#141821'; const ln = wrapLines(c, `${dc.name}：${f.dnotes[dc.id]}`, RW - 26); c.fillText(ln[0] + (ln.length > 1 ? '…' : ''), RX + 24, y); y += 32; }
+      y += 8;
+    }
     const photos = f.photos || [];
     if (photos.length) {
       const imgs = (await Promise.all(photos.slice(0, 4).map(async ph => { const u = await photoSrc(ph); return u ? loadImg(u) : null; }))).filter(Boolean);
@@ -2062,6 +2315,11 @@ document.addEventListener('click', async e => {
     case 'shareFile': { if (pendingFile) { try { await navigator.share({ files: [pendingFile], title: pendingFile.name }); } catch (err) { if (err && err.name !== 'AbortError') saveFile(); } } break; }
     case 'saveFile': saveFile(); break;
     case 'closeModal': closeModal(); break;
+    case 'view3d': S.v3d = !S.v3d; $('#t3d').setAttribute('aria-pressed', String(S.v3d)); render3DView(); if (S.v3d) toast(S.pref.flip ? '舞台の奥から見た3D表示です（もう一度押すと戻ります）' : '客席から見た3D表示です（もう一度押すと戻ります）'); break;
+    case 'zoomReset': resetZoom(); break;
+    case 'videoModal': videoModal(); break;
+    case 'startVideo': { const mode = $('#vMode').value, from = $('#vFrom').value === 'cur' && S.fr ? P.forms[S.fr.i].start : 0; closeModal(); recordVideo(mode, from); break; }
+    case 'recStop': if (S.recStop) S.recStop(); break;
     case 'home': goHome(); break;
     case 'undo': undo(); break;
     case 'redo': redo(); break;
