@@ -111,6 +111,15 @@ body.practice .sc.add{display:none}
 .path{fill:none;stroke-width:.045;stroke-dasharray:.14 .1;opacity:.6}
 .ghost{fill:none;stroke-width:.03;stroke-dasharray:.08 .06;opacity:.45}
 #marq{fill:rgba(115,144,255,.15);stroke:#93A9FF;stroke-width:.03}
+.prop{cursor:move}
+.prop .pb{stroke:rgba(0,0,0,.35);stroke-width:.03}
+.prop.sel .pb{stroke:#FFFFFF;stroke-width:.05;stroke-dasharray:.12 .08}
+.prop text{text-anchor:middle;dominant-baseline:central;pointer-events:none;font-weight:700}
+.rh{fill:#FFFFFF;stroke:#14161C;stroke-width:.03;cursor:nwse-resize}
+body.practice .prop{cursor:default}
+.ptypes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.ptypes .btn{flex-direction:column;padding:12px 4px;font-size:12.5px;white-space:normal;text-align:center}
+.ptypes svg{width:44px;height:30px}
 
 /* sheets */
 .sheet{position:fixed;inset:0;background:rgba(10,12,18,.45);display:flex;align-items:flex-end;justify-content:center;z-index:50}
@@ -182,9 +191,12 @@ input,select,textarea{font-size:16px}
     <button class="tb" data-act="selAll" id="bSelAll">全員を選ぶ</button>
     <button class="tb" data-arr="row">横一列</button>
     <button class="tb" data-arr="col">縦一列</button>
+    <button class="tb" data-arr="grid">格子</button>
+    <button class="tb" data-act="addProp">＋ 道具</button>
     <button class="tb" data-act="sceneEdit">📝 メモ・写真</button>
     <button class="tb" data-act="dancers">👥 ダンサー</button>
     <button class="tb" data-act="sounds">♪ 音源</button>
+    <button class="tb" data-act="stage">🎭 舞台</button>
   </div>
   <div class="play-bar">
     <button class="ib" data-act="prev" aria-label="前のシーン"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M14 6l-6 6 6 6"/></svg></button>
@@ -263,13 +275,14 @@ function gridPoints(n, d) {
 function newProject(name, n) {
   const dancers = [];
   for (let i = 0; i < n; i++) dancers.push({ id: uid(), name: String(i + 1), color: PALETTE[i % PALETTE.length] });
-  const stage = { w: 10, d: 7 }, pts = gridPoints(n, stage.d), pos = {};
+  const stage = { w: 10, d: 7, shape: 'rect', grid: 0.5 }, pts = gridPoints(n, stage.d), pos = {};
   dancers.forEach((d, i) => pos[d.id] = clampPos(pts[i], stage));
-  return { id: uid() + uid(), name, stage, move: 1.5, dancers, sounds: [], scenes: [{ id: uid(), name: 'シーン1', soundId: null, dur: 0, note: '', photos: [], pos }], updatedAt: Date.now() };
+  return { id: uid() + uid(), name, stage, move: 1.5, dancers, sounds: [], props: [], scenes: [{ id: uid(), name: 'シーン1', soundId: null, dur: 0, note: '', photos: [], pos }], updatedAt: Date.now() };
 }
 function migrate(p) {
   p.stage = Object.assign({ w: 10, d: 7 }, p.stage || {}); p.dancers = p.dancers || []; p.sounds = p.sounds || []; p.scenes = p.scenes || [];
-  p.scenes.forEach(s => { s.pos = s.pos || {}; s.note = s.note || ''; s.photos = s.photos || []; s.dur = +s.dur || 0; });
+  p.scenes.forEach(s => { s.pos = s.pos || {}; s.note = s.note || ''; s.photos = s.photos || []; s.dur = +s.dur || 0; s.ppos = s.ppos || {}; });
+  p.props = p.props || []; p.stage.shape = p.stage.shape || 'rect'; p.stage.grid = p.stage.grid || 0.5;
   if (!p.scenes.length) p.scenes.push({ id: uid(), name: 'シーン1', soundId: null, dur: 0, note: '', photos: [], pos: {} });
   return p;
 }
@@ -294,7 +307,7 @@ function undo() {
 }
 function openProject(p) {
   stop(); flush();
-  P = migrate(p); S.cur = 0; S.sel.clear(); S.undo = []; $('#bUndo').disabled = true;
+  P = migrate(p); S.cur = 0; S.sel.clear(); S.psel = null; S.undo = []; $('#bUndo').disabled = true;
   S.me = ls.get('bm2.me.' + P.id, null);
   ls.set('bm2.last', P.id);
   setPractice(false); rebuild();
@@ -313,22 +326,24 @@ function applyView() {
   svg.setAttribute('viewBox', `${PZ.cx - w / 2} ${PZ.cy - h / 2} ${w} ${h}`);
 }
 function buildStage() {
-  const { w, d } = P.stage, grid = 0.5, W = 1.6, M = 0.6, A = 1.4;
+  const { w, d } = P.stage, grid = P.stage.grid || 0.5, circ = P.stage.shape === 'circle', W = 1.6, M = 0.6, A = 1.4;
   const x0 = -w / 2 - W, vw = w + 2 * W, y0 = S.pref.flip ? -A : -M, vh = d + M + A;
   S.vb = [x0, y0, vw, vh]; PZ.k = 1; PZ.cx = PZ.cy = null; applyView();
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-  let h = `<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="context-stroke"/></marker></defs>`;
-  h += `<rect class="wing" x="${x0}" y="${y0}" width="${vw}" height="${vh}"/><rect class="floor" x="${-w / 2}" y="0" width="${w}" height="${d}"/>`;
-  const eps = 1e-6;
-  for (let i = 0; -w / 2 + i * grid <= w / 2 + eps; i++) { const x = -w / 2 + i * grid; h += `<line class="${Math.abs(x - Math.round(x)) < eps ? 'g2' : 'g1'}" x1="${x}" y1="0" x2="${x}" y2="${d}"/>`; }
-  for (let i = 0; i * grid <= d + eps; i++) { const y = i * grid, Y = S.pref.flip ? y : d - y; h += `<line class="${Math.abs(y - Math.round(y)) < eps ? 'g2' : 'g1'}" x1="${-w / 2}" y1="${Y}" x2="${w / 2}" y2="${Y}"/>`; }
+  const shapeAttrs = circ ? `cx="0" cy="${d / 2}" rx="${w / 2}" ry="${d / 2}"` : `x="${-w / 2}" y="0" width="${w}" height="${d}"`, tag = circ ? 'ellipse' : 'rect';
+  let h = `<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="context-stroke"/></marker><clipPath id="fclip"><${tag} ${shapeAttrs}/></clipPath></defs>`;
+  h += `<rect class="wing" x="${x0}" y="${y0}" width="${vw}" height="${vh}"/><${tag} class="floor" ${shapeAttrs}/><g clip-path="url(#fclip)">`;
+  const eps = 1e-6, maj = v => Math.abs(v - Math.round(v)) < eps;
+  for (let x = 0; x <= w / 2 + eps; x += grid) for (const sx of x ? [x, -x] : [0]) h += `<line class="${maj(x) ? 'g2' : 'g1'}" x1="${sx}" y1="0" x2="${sx}" y2="${d}"/>`;
+  for (let y = 0; y <= d + eps; y += grid) { const Y = S.pref.flip ? y : d - y; h += `<line class="${maj(y) ? 'g2' : 'g1'}" x1="${-w / 2}" y1="${Y}" x2="${w / 2}" y2="${Y}"/>`; }
+  h += `<line class="cl" x1="0" y1="0" x2="0" y2="${d}"/></g>`;
   const frontY = S.pref.flip ? 0 : d;
-  h += `<line class="cl" x1="0" y1="0" x2="0" y2="${d}"/><line class="fe" x1="${-w / 2}" y1="${frontY}" x2="${w / 2}" y2="${frontY}"/>`;
+  h += circ ? `<ellipse ${shapeAttrs} fill="none" stroke="var(--tape2)" stroke-width=".04" opacity=".8"/>` : `<line class="fe" x1="${-w / 2}" y1="${frontY}" x2="${w / 2}" y2="${frontY}"/>`;
   for (let i = -Math.floor(w / 2); i <= Math.floor(w / 2); i++) h += `<text class="st-num" x="${i}" y="${S.pref.flip ? -0.28 : d + 0.28}">${Math.abs(i)}</text>`;
   h += `<text class="st-aud" x="0" y="${S.pref.flip ? -0.95 : d + 0.95}">客　席</text>`;
   const kx = S.pref.flip ? -(w / 2 + W / 2) : (w / 2 + W / 2);
   h += `<text class="st-lbl" x="${kx}" y="${d / 2}">上手</text><text class="st-lbl" x="${-kx}" y="${d / 2}">下手</text>`;
-  h += `<g id="gPaths"></g><g id="gGhost"></g><g id="gD"></g><rect id="marq" hidden/>`;
+  h += `<g id="gProps"></g><g id="gPaths"></g><g id="gGhost"></g><g id="gD"></g><g id="gRH"></g><rect id="marq" hidden/>`;
   svg.innerHTML = h;
   $('#gD').innerHTML = P.dancers.map(d => `<g class="dancer" data-id="${d.id}"><circle class="halo" r=".46"/><circle class="body" r=".32" fill="${d.color}"/><text class="lbl" fill="${inkFor(d.color)}" font-size="${lblSize(d.name)}">${esc(short(d.name))}</text>${short(d.name) !== String(d.name).trim() ? `<text class="nm" y=".6">${esc(d.name)}</text>` : ''}</g>`).join('');
   S.dEls = {}; svg.querySelectorAll('.dancer').forEach(el => S.dEls[el.dataset.id] = el);
@@ -347,6 +362,10 @@ function pathD(a, b) { const A = toV(a), B = toV(b); return `M${A[0]} ${A[1]}L${
 function renderFrame() {
   if (!P) return;
   const pos = currentPositions(); S.pos = pos;
+  const pp = currentPropPositions(); S.ppos = pp;
+  $('#gProps').innerHTML = P.props.map(pr => propSVG(pr, pp[pr.id], S.psel === pr.id && editable())).join('');
+  const spr = S.psel && editable() && P.props.find(x => x.id === S.psel);
+  $('#gRH').innerHTML = spr ? (() => { const [X, Y] = toV(pp[spr.id]); return `<rect class="rh" x="${X + spr.w / 2 - .14}" y="${Y + spr.h / 2 - .14}" width=".28" height=".28"/>`; })() : '';
   for (const d of P.dancers) {
     const el = S.dEls[d.id]; if (!el) continue;
     const [X, Y] = toV(pos[d.id]);
@@ -405,19 +424,27 @@ svg.addEventListener('pointerdown', e => {
     S.pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, k0: PZ.k, m0: m }; return;
   }
   if (ptrs.size > 2) return;
-  const p = svgPt(e), g = e.target.closest('.dancer');
+  const p = svgPt(e), g = e.target.closest('.dancer'), rhEl = e.target.closest('.rh'), pg = e.target.closest('.prop');
+  if (rhEl && editable()) { const pr = P.props.find(x => x.id === S.psel); if (pr) { S.drag = { type: 'resize', pr, snap: JSON.stringify(P), moved: false }; svg.setPointerCapture(e.pointerId); e.preventDefault(); return; } }
+  if (pg && !g) {
+    if (!editable()) return;
+    const pr = P.props.find(x => x.id === pg.dataset.pid); if (!pr) return;
+    S.sel.clear(); S.psel = pr.id; const sc = P.scenes[S.cur];
+    S.drag = { type: 'prop', pr, sc, start: [p.x, p.y], orig: propPos(pr, sc).slice(), snap: JSON.stringify(P), moved: false };
+    svg.setPointerCapture(e.pointerId); e.preventDefault(); renderFrame(); return;
+  }
   if (g) {
     const id = g.dataset.id;
     if (S.practice) { setMe(S.me === id ? null : id); return; }
     if (S.playing) { if (Date.now() - blockWarn > 3000) { toast('再生を止めると動かせます'); blockWarn = Date.now(); } return; }
-    if (!S.sel.has(id)) { S.sel = new Set([id]); renderFrame(); }
+    S.psel = null; if (!S.sel.has(id)) S.sel = new Set([id]); renderFrame();
     const sc = P.scenes[S.cur], orig = {};
     S.sel.forEach(sid => orig[sid] = posIn(sc, sid).slice());
     S.drag = { type: 'dancer', id, sc, start: [p.x, p.y], orig, snap: JSON.stringify(P), moved: false };
     svg.setPointerCapture(e.pointerId); e.preventDefault(); return;
   }
   if (!editable()) return;
-  if (S.sel.size) { S.sel.clear(); renderFrame(); }
+  if (S.sel.size || S.psel) { S.sel.clear(); S.psel = null; renderFrame(); }
   S.drag = { type: 'box', start: [p.x, p.y] };
   svg.setPointerCapture(e.pointerId);
 });
@@ -437,9 +464,24 @@ svg.addEventListener('pointermove', e => {
     if (!D.moved) { S.undo.push(D.snap); $('#bUndo').disabled = false; D.moved = true; }
     let dx = S.pref.flip ? -dX : dX, dy = S.pref.flip ? dY : -dY;
     const o = D.orig[D.id]; let nx = o[0] + dx, ny = o[1] + dy;
-    if (S.pref.snap) { nx = Math.round(nx * 4) / 4; ny = Math.round(ny * 4) / 4; }
+    if (S.pref.snap) { const gs = P.stage.grid || 0.5; nx = Math.round(nx / gs) * gs; ny = Math.round(ny / gs) * gs; }
     dx = nx - o[0]; dy = ny - o[1];
     for (const sid in D.orig) D.sc.pos[sid] = clampPos([D.orig[sid][0] + dx, D.orig[sid][1] + dy]);
+    renderFrame();
+  } else if (D.type === 'prop' || D.type === 'resize') {
+    const gs = P.stage.grid || 0.5, sn = v => S.pref.snap ? Math.round(v / gs) * gs : v;
+    if (D.type === 'prop') {
+      const dX = p.x - D.start[0], dY = p.y - D.start[1];
+      if (!D.moved && Math.hypot(dX, dY) < 0.06) return;
+      if (!D.moved) { S.undo.push(D.snap); $('#bUndo').disabled = false; D.moved = true; }
+      const dx = S.pref.flip ? -dX : dX, dy = S.pref.flip ? dY : -dY;
+      const np = [r2(clamp(sn(D.orig[0] + dx), -P.stage.w / 2 - 1.5, P.stage.w / 2 + 1.5)), r2(clamp(sn(D.orig[1] + dy), -0.6, P.stage.d + 0.6))];
+      if (D.pr.move) { D.sc.ppos = D.sc.ppos || {}; D.sc.ppos[D.pr.id] = np; } else D.pr.pos = np;
+    } else {
+      if (!D.moved) { S.undo.push(D.snap); $('#bUndo').disabled = false; D.moved = true; }
+      const c0 = toV(S.ppos[D.pr.id]), q = v => S.pref.snap ? Math.max(0.25, Math.round(v * 4) / 4) : Math.max(0.2, r2(v));
+      D.pr.w = q(Math.abs(p.x - c0[0]) * 2); D.pr.h = q(Math.abs(p.y - c0[1]) * 2);
+    }
     renderFrame();
   } else if (D.type === 'box') {
     const x1 = Math.min(D.start[0], p.x), y1 = Math.min(D.start[1], p.y), x2 = Math.max(D.start[0], p.x), y2 = Math.max(D.start[1], p.y);
@@ -455,7 +497,8 @@ function endDrag(e) {
   if (S.pinch) { if (ptrs.size < 2) S.pinch = null; return; }
   const D = S.drag; if (!D) return; S.drag = null;
   const mq = $('#marq'); if (mq) mq.hidden = true;
-  if (D.type === 'dancer' && D.moved) { save(); renderScenes(); }
+  if ((D.type === 'dancer' || D.type === 'prop' || D.type === 'resize') && D.moved) { save(); renderScenes(); }
+  if (D.type === 'prop' && !D.moved) propSheet(D.pr.id);
 }
 svg.addEventListener('pointerup', endDrag);
 svg.addEventListener('pointercancel', endDrag);
@@ -472,6 +515,15 @@ function arrange(kind) {
   if (kind === 'row') {
     const s = Math.min(1, (P.stage.w - 0.6) / (n - 1)), span = s * (n - 1), x0 = clamp(cx - span / 2, -P.stage.w / 2 + 0.3, P.stage.w / 2 - 0.3 - span);
     ids.sort((a, b) => cur[a][0] - cur[b][0]).forEach((id, i) => sc.pos[id] = clampPos([x0 + i * s, cy]));
+  } else if (kind === 'grid') {
+    const cols = Math.max(1, Math.ceil(Math.sqrt(n * 1.5))), rows = Math.ceil(n / cols);
+    const sx = Math.min(1, (P.stage.w - 0.6) / Math.max(1, cols - 1)), sy = Math.min(1, (P.stage.d - 0.4) / Math.max(1, rows - 1));
+    const gx = clamp(cx, -P.stage.w / 2 + 0.3 + sx * (cols - 1) / 2, P.stage.w / 2 - 0.3 - sx * (cols - 1) / 2), gy = clamp(cy, 0.2 + sy * (rows - 1) / 2, P.stage.d - 0.2 - sy * (rows - 1) / 2);
+    const order = ids.sort((a, b) => (cur[a][1] - cur[b][1]) || (cur[a][0] - cur[b][0]));
+    for (let r = 0; r < rows; r++) {
+      const row = order.slice(r * cols, r * cols + cols).sort((a, b) => cur[a][0] - cur[b][0]);
+      row.forEach((id, c) => sc.pos[id] = clampPos([gx + (c - (row.length - 1) / 2) * sx, gy + (r - (rows - 1) / 2) * sy]));
+    }
   } else {
     const s = Math.min(1, (P.stage.d - 0.4) / (n - 1)), span = s * (n - 1), y0 = clamp(cy - span / 2, 0.2, P.stage.d - 0.2 - span);
     ids.sort((a, b) => cur[a][1] - cur[b][1]).forEach((id, i) => sc.pos[id] = clampPos([cx, y0 + i * s]));
@@ -481,8 +533,14 @@ function arrange(kind) {
 
 // ================= scenes strip =================
 function thumbSVG(sc) {
-  const w = P.stage.w, d = P.stage.d, pad = 0.6;
-  let h = `<svg viewBox="${-w / 2 - pad} ${-pad} ${w + pad * 2} ${d + pad * 2}" preserveAspectRatio="xMidYMid meet"><rect x="${-w / 2}" y="0" width="${w}" height="${d}" fill="var(--floor)" stroke="rgba(255,255,255,.12)" stroke-width=".05"/><line x1="0" y1="0" x2="0" y2="${d}" stroke="var(--tape)" stroke-width=".06" stroke-dasharray=".3 .15" opacity=".7"/>`;
+  const w = P.stage.w, d = P.stage.d, pad = 0.6, circ = P.stage.shape === 'circle';
+  let h = `<svg viewBox="${-w / 2 - pad} ${-pad} ${w + pad * 2} ${d + pad * 2}" preserveAspectRatio="xMidYMid meet">`;
+  h += circ ? `<ellipse cx="0" cy="${d / 2}" rx="${w / 2}" ry="${d / 2}" fill="var(--floor)" stroke="rgba(255,255,255,.12)" stroke-width=".05"/>` : `<rect x="${-w / 2}" y="0" width="${w}" height="${d}" fill="var(--floor)" stroke="rgba(255,255,255,.12)" stroke-width=".05"/>`;
+  h += `<line x1="0" y1="0" x2="0" y2="${d}" stroke="var(--tape)" stroke-width=".06" stroke-dasharray=".3 .15" opacity=".7"/>`;
+  for (const pr of P.props) {
+    if (pr.type === 'text') continue; const q = propPos(pr, sc);
+    h += (pr.type === 'round' || pr.type === 'takahari') ? `<ellipse cx="${q[0]}" cy="${d - q[1]}" rx="${pr.w / 2}" ry="${pr.h / 2}" fill="${pr.color}" opacity=".85"/>` : `<rect x="${q[0] - pr.w / 2}" y="${d - q[1] - pr.h / 2}" width="${pr.w}" height="${pr.h}" fill="${pr.color}" opacity=".85"/>`;
+  }
   for (const dc of P.dancers) { const q = sc.pos[dc.id]; if (q) h += `<circle cx="${q[0]}" cy="${d - q[1]}" r=".38" fill="${dc.color}"/>`; }
   return h + '</svg>';
 }
@@ -618,7 +676,7 @@ function addSceneSheet() {
     card.querySelector('[data-act="chipAddSound"]').onclick = () => { const nm = card.querySelector('#nsName').value; afterSoundAdd = added => { if (added.length) pick = added[0].id; draw(); $('#nsName').value = nm; }; $('#fSound').click(); };
     card.querySelector('#nsGo').onclick = () => {
       checkpoint();
-      const from = P.scenes[S.cur], sc = { id: uid(), name: card.querySelector('#nsName').value.trim() || `シーン${P.scenes.length + 1}`, soundId: pick, dur: 0, note: '', photos: [], pos: JSON.parse(JSON.stringify(from.pos)) };
+      const from = P.scenes[S.cur], sc = { id: uid(), name: card.querySelector('#nsName').value.trim() || `シーン${P.scenes.length + 1}`, soundId: pick, dur: 0, note: '', photos: [], pos: JSON.parse(JSON.stringify(from.pos)), ppos: JSON.parse(JSON.stringify(from.ppos || {})) };
       P.scenes.splice(S.cur + 1, 0, sc); S.cur++;
       closeSheet(); renderFrame(); renderScenes(); save();
       toast('シーンを追加しました。ダンサーを動かしてください');
@@ -751,28 +809,132 @@ function menuSheet() {
   stop();
   openSheet(`<h2>その他</h2>
     <div class="menu">
+      <button class="btn" data-act="stage">🎭 舞台の形・大きさ・格子</button>
+      <button class="btn" data-act="addProp">＋ 道具を置く（カーテン・高張・セットなど）</button>
       <button class="btn" data-act="sounds">♪ 音源の一覧</button>
       <button class="btn" data-act="dancers">👥 ダンサーの名前・色・人数</button>
       <button class="btn" data-act="exportPDF">📕 PDFにする</button>
       <button class="btn" data-act="videoSheet">🎬 練習動画を作る</button>
       <button class="btn" data-act="openFile">📂 ファイルを開く</button>
     </div>
-    <div class="row2"><label class="field">ステージの幅（m）<input class="tin num" id="mW" type="number" inputmode="decimal" min="3" max="40" step="0.5" value="${P.stage.w}"></label>
-    <label class="field">奥行（m）<input class="tin num" id="mD" type="number" inputmode="decimal" min="2" max="30" step="0.5" value="${P.stage.d}"></label></div>
+    <div class="acts"><button class="btn primary" data-act="closeSheet">閉じる</button></div>`);
+}
+function stageSheet() {
+  stop();
+  const st = P.stage, circ = st.shape === 'circle';
+  openSheet(`<h2>舞台</h2>
+    <div class="field">形<div class="chips"><button class="chip ${!circ ? 'on' : ''}" data-shape="rect">▭ 四角</button><button class="chip ${circ ? 'on' : ''}" data-shape="circle">◯ 円・だ円</button></div></div>
+    <div class="row2"><label class="field">${circ ? '横の直径' : '幅'}（m）<input class="tin num" id="mW" type="number" inputmode="decimal" min="2" max="40" step="0.5" value="${st.w}"></label>
+    <label class="field">${circ ? '縦の直径' : '奥行'}（m）<input class="tin num" id="mD" type="number" inputmode="decimal" min="2" max="30" step="0.5" value="${st.d}"></label></div>
+    ${circ ? '<p>横と縦を同じ数字にすると真円になります。</p>' : ''}
+    <div class="field">格子の間隔<div class="chips">${[0.25, 0.5, 1].map(g => `<button class="chip ${(st.grid || 0.5) == g ? 'on' : ''}" data-grid="${g}">${g * 100}cm</button>`).join('')}</div></div>
+    <label class="chk"><input type="checkbox" data-pref="snap" ${S.pref.snap ? 'checked' : ''}>格子の線に合わせて置く</label>
     <label class="field">移動にかける秒数（シーンの始まりに移動します）<input class="tin num" id="mMove" type="number" inputmode="decimal" min="0" max="10" step="0.5" value="${moveTime()}"></label>
     <label class="chk"><input type="checkbox" data-pref="names" ${S.pref.names ? 'checked' : ''}>名前を表示</label>
     <label class="chk"><input type="checkbox" data-pref="flip" ${S.pref.flip ? 'checked' : ''}>ダンサー目線（客席を上にする）</label>
-    <label class="chk"><input type="checkbox" data-pref="snap" ${S.pref.snap ? 'checked' : ''}>25cm単位でそろえて動かす</label>
-    <div class="acts"><button class="btn primary" data-act="closeSheet">閉じる</button></div>`, card => {
+    <div class="acts"><button class="btn primary" data-act="closeSheet">完了</button></div>`, card => {
+    card.addEventListener('click', e => {
+      const b = e.target.closest('[data-shape],[data-grid]'); if (!b) return;
+      checkpoint();
+      if (b.dataset.shape) P.stage.shape = b.dataset.shape; else P.stage.grid = parseFloat(b.dataset.grid);
+      rebuild(); save(); stageSheet();
+    });
     card.addEventListener('change', e => {
       const t = e.target;
       if (t.dataset.pref) { S.pref[t.dataset.pref] = t.checked; savePref(); buildStage(); renderFrame(); return; }
       checkpoint();
-      if (t.id === 'mW') P.stage.w = clamp(parseFloat(t.value) || 10, 3, 40);
+      if (t.id === 'mW') P.stage.w = clamp(parseFloat(t.value) || 10, 2, 40);
       if (t.id === 'mD') P.stage.d = clamp(parseFloat(t.value) || 7, 2, 30);
       if (t.id === 'mMove') P.move = clamp(parseFloat(t.value) || 0, 0, 10) || 0.01;
       for (const sc of P.scenes) for (const k in sc.pos) sc.pos[k] = clampPos(sc.pos[k]);
       rebuild(); save();
+      if (t.id === 'mW' || t.id === 'mD') stageSheet();
+    });
+  });
+}
+
+// ================= stage props: curtains, lanterns, sets, rough shapes, text =================
+const PROP_TYPES = [
+  { type: 'curtain', name: 'カーテン', label: 'カーテン', w: 0, h: 0.3, color: '#8E2C3A' },
+  { type: 'takahari', name: '高張（提灯）', label: '高張', w: 0.6, h: 0.6, color: '#E39B2D' },
+  { type: 'set', name: 'セット（大道具）', label: 'セット', w: 2, h: 1, color: '#6B7280' },
+  { type: 'box', name: '四角', label: '', w: 1, h: 1, color: '#3F7D6E' },
+  { type: 'round', name: '丸', label: '', w: 1, h: 1, color: '#5B6CB0' },
+  { type: 'text', name: '文字', label: '文字', w: 2, h: 0.6, color: '#FFFFFF' }
+];
+const PROP_ICON = {
+  curtain: '<rect x="2" y="9" width="36" height="10" rx="2" fill="#8E2C3A"/><path d="M9 9v10M16 9v10M23 9v10M30 9v10" stroke="rgba(0,0,0,.35)"/>',
+  takahari: '<path d="M20 1v4" stroke="currentColor" stroke-width="2"/><ellipse cx="20" cy="14" rx="7" ry="9" fill="#E39B2D"/><path d="M13 11h14M13 17h14" stroke="rgba(0,0,0,.3)"/>',
+  set: '<rect x="5" y="6" width="30" height="16" rx="2" fill="#6B7280"/>',
+  box: '<rect x="11" y="4" width="18" height="18" rx="2" fill="#3F7D6E"/>',
+  round: '<circle cx="20" cy="14" r="10" fill="#5B6CB0"/>',
+  text: '<text x="20" y="19" font-size="13" text-anchor="middle" font-weight="700" fill="currentColor">Aあ</text>'
+};
+const propPos = (pr, sc) => (pr.move && sc && sc.ppos && sc.ppos[pr.id]) || pr.pos;
+function currentPropPositions() {
+  const sc = P.scenes[S.cur], out = {};
+  for (const pr of P.props) {
+    let b = propPos(pr, sc);
+    if (S.playing && S.cur > 0 && pr.move) { const a = propPos(pr, P.scenes[S.cur - 1]), u = ease(clamp(S.t / moveTime(), 0, 1)); b = [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u]; }
+    out[pr.id] = b;
+  }
+  return out;
+}
+const propsAt = i => Object.fromEntries(P.props.map(pr => [pr.id, propPos(pr, P.scenes[i])]));
+function propFont(pr) {
+  const L = [...(pr.label || '')].length || 1;
+  return pr.type === 'text' ? Math.max(0.14, Math.min(pr.h * 0.7, pr.w * 0.95 / L, 0.9)) : Math.max(0.12, Math.min(pr.h * 0.5, pr.w * 0.9 / L, 0.45));
+}
+function propSVG(pr, p, sel) {
+  const [X, Y] = toV(p), w = pr.w, h = pr.h;
+  let body;
+  if (pr.type === 'text') body = `<rect class="pb" x="${-w / 2}" y="${-h / 2}" width="${w}" height="${h}" fill="rgba(0,0,0,0.001)" stroke="${sel ? '#FFFFFF' : 'rgba(255,255,255,.18)'}" stroke-width=".02" stroke-dasharray=".1 .08"/>`;
+  else if (pr.type === 'round' || pr.type === 'takahari') body = `<ellipse class="pb" rx="${w / 2}" ry="${h / 2}" fill="${pr.color}"/>${pr.type === 'takahari' ? `<ellipse rx="${w * .32}" ry="${h * .32}" fill="none" stroke="rgba(0,0,0,.25)" stroke-width=".03"/>` : ''}`;
+  else body = `<rect class="pb" x="${-w / 2}" y="${-h / 2}" width="${w}" height="${h}" rx="${pr.type === 'curtain' ? 0.04 : 0.08}" fill="${pr.color}"/>${pr.type === 'curtain' ? Array.from({ length: Math.max(0, Math.floor(w / 0.6)) }, (_, i) => `<line x1="${-w / 2 + (i + 1) * w / (Math.floor(w / 0.6) + 1)}" y1="${-h / 2}" x2="${-w / 2 + (i + 1) * w / (Math.floor(w / 0.6) + 1)}" y2="${h / 2}" stroke="rgba(0,0,0,.25)" stroke-width=".02"/>`).join('') : ''}`;
+  const tf = pr.type === 'text' ? '#F2F4F8' : inkFor(pr.color);
+  return `<g class="prop ${sel ? 'sel' : ''}" data-pid="${pr.id}" transform="translate(${X.toFixed(3)} ${Y.toFixed(3)})">${body}${pr.label ? `<text font-size="${propFont(pr).toFixed(3)}" fill="${tf}">${esc(pr.label)}</text>` : ''}</g>`;
+}
+function addPropSheet() {
+  stop();
+  openSheet(`<h2>道具を置く</h2>
+    <div class="ptypes">${PROP_TYPES.map(t => `<button class="btn" data-act="propType" data-type="${t.type}"><svg viewBox="0 0 40 28" aria-hidden="true">${PROP_ICON[t.type]}</svg>${t.name}</button>`).join('')}</div>
+    <p>置いたあとは、ドラッグで移動・右下の□で大きさを変更・タップで文字や色を変更できます。</p>
+    <div class="acts"><button class="btn" data-act="closeSheet">閉じる</button></div>`);
+}
+function addProp(type) {
+  const t = PROP_TYPES.find(x => x.type === type); if (!t) return;
+  const { w, d } = P.stage;
+  let pos = [0, type === 'curtain' ? d - 0.15 : type === 'takahari' ? d - 0.6 : d / 2];
+  const pp = currentPropPositions(), busy = q => P.props.some(o => pp[o.id] && Math.abs(pp[o.id][0] - q[0]) < 1 && Math.abs(pp[o.id][1] - q[1]) < 0.6);
+  const y0 = pos[1];
+  find: for (const dy of [0, -1.2, 1.2]) for (const dx of [0, -2.5, 2.5, -4, 4, -1.25, 1.25]) { const q = [dx, clamp(y0 + dy, 0, d)]; if (!busy(q)) { pos = q; break find; } }
+  const pr = { id: uid(), type, label: t.label, w: t.w || w, h: t.h, color: t.color, move: false, pos };
+  checkpoint(); P.props.push(pr); S.psel = pr.id; S.sel.clear();
+  closeSheet(); renderFrame(); renderScenes(); save();
+  toast('置きました。ドラッグで移動、タップで文字や大きさを変更できます', 3500);
+}
+function propSheet(id) {
+  const pr = P.props.find(x => x.id === id); if (!pr) return;
+  S.propEdit = id;
+  const t = PROP_TYPES.find(x => x.type === pr.type);
+  openSheet(`<h2>${t ? t.name : '道具'}</h2>
+    <label class="field">書き込む文字<input class="tin" id="prL" value="${esc(pr.label)}" placeholder="例：花道、出はけ口、旗"></label>
+    <div class="row2"><label class="field">横（m）<input class="tin num" id="prW" type="number" inputmode="decimal" min="0.2" step="0.25" value="${pr.w}"></label>
+    <label class="field">縦（m）<input class="tin num" id="prH" type="number" inputmode="decimal" min="0.2" step="0.25" value="${pr.h}"></label></div>
+    ${pr.type === 'text' ? '' : `<label class="field">色<input type="color" class="sw" id="prC" value="${pr.color}"></label>`}
+    <label class="chk"><input type="checkbox" id="prM" ${pr.move ? 'checked' : ''}>シーンごとに位置を変える（オフなら全シーンで同じ位置）</label>
+    <div class="acts" style="justify-content:space-between"><div class="acts"><button class="btn sm" data-act="propSwap">縦横を入れ替え</button><button class="btn sm" data-act="propDup">複製</button><button class="btn sm danger" data-act="propDel">削除</button></div><button class="btn primary" data-act="closeSheet">完了</button></div>`, card => {
+    let edited = false; const mark = () => { if (!edited) { checkpoint(); edited = true; } };
+    const upd = () => { renderFrame(); renderScenes(); save(); };
+    card.querySelector('#prL').addEventListener('input', e => { mark(); pr.label = e.target.value; upd(); });
+    card.querySelector('#prW').addEventListener('change', e => { mark(); pr.w = Math.max(0.2, parseFloat(e.target.value) || pr.w); upd(); });
+    card.querySelector('#prH').addEventListener('change', e => { mark(); pr.h = Math.max(0.2, parseFloat(e.target.value) || pr.h); upd(); });
+    const pc = card.querySelector('#prC'); if (pc) pc.addEventListener('input', e => { mark(); pr.color = e.target.value; upd(); });
+    card.querySelector('#prM').addEventListener('change', e => {
+      mark(); pr.move = e.target.checked;
+      if (pr.move) P.scenes.forEach(sc => { sc.ppos = sc.ppos || {}; if (!sc.ppos[pr.id]) sc.ppos[pr.id] = pr.pos.slice(); });
+      else { const cur = (P.scenes[S.cur].ppos || {})[pr.id]; if (cur) pr.pos = cur.slice(); }
+      upd();
     });
   });
 }
@@ -833,22 +995,31 @@ function sendSheet() {
 // ================= canvas drawing shared by PDF and video =================
 const CUI = '"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",sans-serif', CDISP = '"Dela Gothic One",' + CUI, CNUM = '"IBM Plex Mono",monospace';
 async function ensureFonts() { try { await Promise.all([document.fonts.load('700 20px "Zen Kaku Gothic New"'), document.fonts.load('400 20px "Zen Kaku Gothic New"'), document.fonts.load('20px "Dela Gothic One"'), document.fonts.load('20px "IBM Plex Mono"')]); } catch (e) {} }
-function drawStageCanvas(c, pos, nextPos, X, Y, Wb, Hb, names, me) {
+function drawStageCanvas(c, pos, nextPos, X, Y, Wb, Hb, names, me, ppos) {
   const { w, d } = P.stage, foot = 40, sc = Math.min(Wb / (w + 3), (Hb - foot) / d);
   const fw = w * sc, fh = d * sc, fx = X + (Wb - fw) / 2, fy = Y, toX = x => fx + (x + w / 2) * sc, toY = y => fy + (d - y) * sc;
   c.save();
   c.fillStyle = '#14161C'; c.fillRect(fx - 1.5 * sc, fy, fw + 3 * sc, fh);
-  c.fillStyle = '#1D2029'; c.fillRect(fx, fy, fw, fh);
+  const circ = P.stage.shape === 'circle';
+  c.save(); c.beginPath(); if (circ) c.ellipse(toX(0), toY(d / 2), fw / 2, fh / 2, 0, 0, Math.PI * 2); else c.rect(fx, fy, fw, fh);
+  c.fillStyle = '#1D2029'; c.fill(); c.clip();
   c.strokeStyle = 'rgba(255,255,255,.13)'; c.lineWidth = 1;
   for (let gx = Math.ceil(-w / 2); gx <= w / 2; gx++) { c.beginPath(); c.moveTo(toX(gx), fy); c.lineTo(toX(gx), fy + fh); c.stroke(); }
   for (let gy = 1; gy < d; gy++) { c.beginPath(); c.moveTo(fx, toY(gy)); c.lineTo(fx + fw, toY(gy)); c.stroke(); }
   c.strokeStyle = '#F2C230'; c.lineWidth = Math.max(1.5, sc * .04); c.setLineDash([sc * .25, sc * .12]); c.beginPath(); c.moveTo(toX(0), fy); c.lineTo(toX(0), fy + fh); c.stroke(); c.setLineDash([]);
-  c.strokeStyle = '#EF5F7A'; c.lineWidth = Math.max(2, sc * .05); c.beginPath(); c.moveTo(fx, fy + fh); c.lineTo(fx + fw, fy + fh); c.stroke();
+  c.restore();
+  c.strokeStyle = '#EF5F7A'; c.lineWidth = Math.max(2, sc * .05); c.beginPath(); if (circ) c.ellipse(toX(0), toY(d / 2), fw / 2, fh / 2, 0, 0, Math.PI * 2); else { c.moveTo(fx, fy + fh); c.lineTo(fx + fw, fy + fh); } c.stroke();
   const nf = Math.max(10, Math.round(sc * .24));
   c.fillStyle = '#8F97A9'; c.font = `${nf}px ${CNUM}`; c.textAlign = 'center'; c.textBaseline = 'middle';
   for (let gx = Math.ceil(-w / 2); gx <= w / 2; gx++) c.fillText(String(Math.abs(gx)), toX(gx), fy + fh + nf * .9);
   c.font = `${nf}px ${CUI}`; c.fillText('下手', fx - .75 * sc, fy + fh / 2); c.fillText('上手', fx + fw + .75 * sc, fy + fh / 2);
   c.fillStyle = '#B08A10'; c.font = `bold ${nf}px ${CUI}`; c.fillText('客　席', toX(0), fy + fh + nf * 2.3);
+  if (ppos) for (const pr of P.props) {
+    const q = ppos[pr.id]; if (!q) continue;
+    const cx = toX(q[0]), cy = toY(q[1]), pw = pr.w * sc, ph = pr.h * sc;
+    if (pr.type !== 'text') { c.fillStyle = pr.color; c.beginPath(); if (pr.type === 'round' || pr.type === 'takahari') c.ellipse(cx, cy, pw / 2, ph / 2, 0, 0, Math.PI * 2); else c.rect(cx - pw / 2, cy - ph / 2, pw, ph); c.fill(); }
+    if (pr.label) { c.font = `bold ${Math.max(9, Math.round(propFont(pr) * sc))}px ${CUI}`; c.fillStyle = pr.type === 'text' ? '#F2F4F8' : inkFor(pr.color); c.fillText(pr.label, cx, cy + 1); }
+  }
   if (nextPos) for (const dc of P.dancers) {
     const a = pos[dc.id], b = nextPos[dc.id]; if (!a || !b || Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.05) continue;
     if (me && me !== dc.id) continue;
@@ -931,7 +1102,7 @@ async function buildPdfPages() {
     c.fillStyle = '#3A4150'; c.font = `24px ${CUI}`; c.fillText(`${snd ? '♪ ' + snd.name : '音なし'}　${fmtS(sceneDur(sc))}${nx ? `　→ 次「${nx.name}」` : ''}`, M + 26, 192);
     const pos = {}; P.dancers.forEach(d => pos[d.id] = posIn(sc, d.id));
     const npos = nx ? Object.fromEntries(P.dancers.map(d => [d.id, posIn(nx, d.id)])) : null;
-    drawStageCanvas(c, pos, npos, M, 240, 1050, PH - 360, true, null);
+    drawStageCanvas(c, pos, npos, M, 240, 1050, PH - 360, true, null, propsAt(i));
     c.textAlign = 'left'; c.textBaseline = 'alphabetic';
     const RX = M + 1100, RW = PW - M - RX, yMax = PH - 120; let y = 260;
     c.fillStyle = '#5B6474'; c.font = `bold 22px ${CUI}`; c.fillText('メモ', RX, y); y += 14; c.fillStyle = '#E3E6EC'; c.fillRect(RX, y, RW, 2); y += 38;
@@ -996,7 +1167,7 @@ async function recordVideo() {
   const draw = () => {
     const pos = currentPositions(), sc = P.scenes[S.cur];
     c.fillStyle = '#14161C'; c.fillRect(0, 0, W, H);
-    drawStageCanvas(c, pos, null, 40, 104, W - 80, H - 124, true, S.me);
+    drawStageCanvas(c, pos, null, 40, 104, W - 80, H - 124, true, S.me, currentPropPositions());
     c.fillStyle = 'rgba(10,12,16,.72)'; c.fillRect(0, 0, W, 86); c.textAlign = 'left'; c.textBaseline = 'alphabetic';
     c.fillStyle = '#FFFFFF'; c.font = `bold 34px ${CUI}`; c.fillText(`${S.cur + 1}. ${sc.name}`, 28, 46);
     const snd = soundOf(sc); c.fillStyle = '#B9C0D0'; c.font = `20px ${CUI}`; c.fillText(`${snd ? '♪ ' + snd.name : '音なし'}${sc.note ? '　📝 ' + sc.note.replace(/\n/g, ' ').slice(0, 40) : ''}`, 28, 74);
@@ -1096,6 +1267,16 @@ document.addEventListener('click', async e => {
       checkpoint(); const sc = P.scenes[S.cur]; sc.photos = sc.photos.filter(p => p.id !== t.dataset.ph); IDB.del('p:' + t.dataset.ph); save(); renderScenes(); editSceneSheet(S.cur); break;
     }
     case 'closeSheet': closeSheet(); break;
+    case 'stage': stageSheet(); break;
+    case 'addProp': addPropSheet(); break;
+    case 'propType': addProp(t.dataset.type); break;
+    case 'propSwap': { const pr = P.props.find(x => x.id === S.propEdit); if (pr) { checkpoint(); [pr.w, pr.h] = [pr.h, pr.w]; renderFrame(); renderScenes(); save(); propSheet(pr.id); } break; }
+    case 'propDup': { const pr = P.props.find(x => x.id === S.propEdit); if (pr) { checkpoint(); const c = JSON.parse(JSON.stringify(pr)); c.id = uid(); c.pos = [r2(pr.pos[0] + 0.5), pr.pos[1]]; P.props.push(c); P.scenes.forEach(sc => { if (sc.ppos && sc.ppos[pr.id]) sc.ppos[c.id] = [r2(sc.ppos[pr.id][0] + 0.5), sc.ppos[pr.id][1]]; }); S.psel = c.id; closeSheet(); renderFrame(); renderScenes(); save(); } break; }
+    case 'propDel': {
+      if (t.dataset.confirm !== '1') { t.dataset.confirm = '1'; t.textContent = '本当に削除'; break; }
+      checkpoint(); const id = S.propEdit; P.props = P.props.filter(x => x.id !== id); P.scenes.forEach(sc => { if (sc.ppos) delete sc.ppos[id]; }); S.psel = null;
+      closeSheet(); renderFrame(); renderScenes(); save(); toast('道具を削除しました'); break;
+    }
   }
 });
 $('#scenes').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.classList.contains('sc')) e.target.click(); });
