@@ -192,6 +192,7 @@ input,select,textarea{font-size:16px}
     <button class="tb" data-arr="row">横一列</button>
     <button class="tb" data-arr="col">縦一列</button>
     <button class="tb" data-arr="grid">格子</button>
+    <button class="tb" data-act="copyForward">⇢ 後ろにも</button>
     <button class="tb" data-act="addProp">＋ 道具</button>
     <button class="tb" data-act="sceneEdit">📝 メモ・写真</button>
     <button class="tb" data-act="dancers">👥 ダンサー</button>
@@ -254,7 +255,7 @@ const IDB = {
 let P = null;
 const S = {
   cur: 0, sel: new Set(), playing: false, t: 0, dur: 0, practice: false, me: null, undo: [],
-  pref: Object.assign({ flip: false, names: true, snap: true, propOnly: true }, ls.get('bm2.pref', {})),
+  pref: Object.assign({ flip: false, names: true, snap: true, propOnly: true, ripple: true }, ls.get('bm2.pref', {})),
   buf: {}, src: null, drag: null, dEls: {}, photoUrls: {}, saveTimer: null
 };
 const savePref = () => ls.set('bm2.pref', S.pref);
@@ -497,6 +498,8 @@ function endDrag(e) {
   if (S.pinch) { if (ptrs.size < 2) S.pinch = null; return; }
   const D = S.drag; if (!D) return; S.drag = null;
   const mq = $('#marq'); if (mq) mq.hidden = true;
+  if (D.type === 'dancer' && D.moved) rippleNote(rippleForward(D.orig, S.cur));
+  if (D.type === 'prop' && D.moved && D.pr.move) rippleNote(rippleForward({ [D.pr.id]: D.orig }, S.cur, 'ppos'));
   if ((D.type === 'dancer' || D.type === 'prop' || D.type === 'resize') && D.moved) { save(); renderScenes(); }
   if (D.type === 'prop' && !D.moved) propSheet(D.pr.id);
 }
@@ -504,6 +507,32 @@ svg.addEventListener('pointerup', endDrag);
 svg.addEventListener('pointercancel', endDrag);
 svg.addEventListener('dblclick', () => { PZ.k = 1; PZ.cx = PZ.cy = null; applyView(); });
 
+// moving someone in a scene also moves them in the following scenes where they were still standing on the old spot
+function rippleForward(oldMap, si, key) {
+  key = key || 'pos';
+  if (!S.pref.ripple) return 0;
+  const same = (a, b) => a && b && Math.abs(a[0] - b[0]) < 1e-3 && Math.abs(a[1] - b[1]) < 1e-3;
+  let n = 0;
+  for (const id in oldMap) {
+    const o = oldMap[id], nw = (P.scenes[si][key] || {})[id]; if (!nw || same(o, nw)) continue;
+    for (let k = si + 1; k < P.scenes.length; k++) {
+      const m = P.scenes[k][key] || (P.scenes[k][key] = {});
+      if (!same(m[id], o)) break;
+      m[id] = nw.slice(); n = Math.max(n, k - si);
+    }
+  }
+  return n;
+}
+function rippleNote(n) { if (n) toast(`後ろの${n}シーンでも同じ場所にいたので、一緒に動かしました`, 2200); }
+function copyForward() {
+  if (!editable()) return;
+  const ids = [...S.sel]; if (!ids.length) { toast('後ろのシーンにもコピーしたい人を選んでから押してください（複数選べます）', 3500); return; }
+  const n = P.scenes.length - 1 - S.cur; if (!n) { toast('後ろにシーンがありません'); return; }
+  checkpoint();
+  const sc = P.scenes[S.cur];
+  for (let k = S.cur + 1; k < P.scenes.length; k++) for (const id of ids) P.scenes[k].pos[id] = posIn(sc, id).slice();
+  renderScenes(); save(); toast(`選んだ${ids.length}人を、後ろの${n}シーンでも同じ位置にしました`, 3000);
+}
 function arrange(kind) {
   if (!editable()) return;
   const sc = P.scenes[S.cur];
@@ -528,6 +557,7 @@ function arrange(kind) {
     const s = Math.min(1, (P.stage.d - 0.4) / (n - 1)), span = s * (n - 1), y0 = clamp(cy - span / 2, 0.2, P.stage.d - 0.2 - span);
     ids.sort((a, b) => cur[a][1] - cur[b][1]).forEach((id, i) => sc.pos[id] = clampPos([cx, y0 + i * s]));
   }
+  rippleNote(rippleForward(cur, S.cur));
   renderFrame(); renderScenes(); save();
 }
 
@@ -560,8 +590,9 @@ function goScene(i) {
   if (S.playing) { startScene(i); return; }
   if (i === S.cur) return;
   const from = { d: Object.assign({}, S.pos), p: Object.assign({}, S.ppos) };
-  S.cur = i; S.anim = { from, t0: performance.now(), dur: 550 };
+  S.cur = i; const anim = S.anim = { from, t0: performance.now(), dur: 550 };
   renderScenes(); animStep();
+  setTimeout(() => { if (S.anim === anim) { S.anim = null; renderFrame(); } }, 650);
 }
 function animStep() {
   if (!S.anim) return;
@@ -841,6 +872,7 @@ function stageSheet() {
     ${circ ? '<p>横と縦を同じ数字にすると真円になります。</p>' : ''}
     <div class="field">格子の間隔<div class="chips">${[0.25, 0.5, 1].map(g => `<button class="chip ${(st.grid || 0.5) == g ? 'on' : ''}" data-grid="${g}">${g * 100}cm</button>`).join('')}</div></div>
     <label class="chk"><input type="checkbox" data-pref="snap" ${S.pref.snap ? 'checked' : ''}>格子の線に合わせて置く</label>
+    <label class="chk"><input type="checkbox" data-pref="ripple" ${S.pref.ripple ? 'checked' : ''}>人を動かすと、後ろのシーンでも同じ場所にいた人は一緒に動く</label>
     <label class="field">移動にかける秒数（シーンの始まりに移動します）<input class="tin num" id="mMove" type="number" inputmode="decimal" min="0" max="10" step="0.5" value="${moveTime()}"></label>
     <label class="chk"><input type="checkbox" data-pref="names" ${S.pref.names ? 'checked' : ''}>名前を表示</label>
     <label class="chk"><input type="checkbox" data-pref="flip" ${S.pref.flip ? 'checked' : ''}>ダンサー目線（客席を上にする）</label>
@@ -1289,6 +1321,7 @@ document.addEventListener('click', async e => {
     }
     case 'closeSheet': closeSheet(); break;
     case 'stage': stageSheet(); break;
+    case 'copyForward': copyForward(); break;
     case 'addProp': addPropSheet(); break;
     case 'propType': addProp(t.dataset.type); break;
     case 'propToggle': {

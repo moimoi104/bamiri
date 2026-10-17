@@ -1,5 +1,5 @@
 // オフラインでも開けるように、アプリ本体・フォント・PDF部品をキャッシュする
-const CACHE = 'bamiri-v7';
+const CACHE = 'bamiri-v8';
 const APP = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-180.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(APP)).then(() => self.skipWaiting()));
