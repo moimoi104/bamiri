@@ -254,7 +254,7 @@ const IDB = {
 let P = null;
 const S = {
   cur: 0, sel: new Set(), playing: false, t: 0, dur: 0, practice: false, me: null, undo: [],
-  pref: Object.assign({ flip: false, names: true, snap: true }, ls.get('bm2.pref', {})),
+  pref: Object.assign({ flip: false, names: true, snap: true, propOnly: true }, ls.get('bm2.pref', {})),
   buf: {}, src: null, drag: null, dEls: {}, photoUrls: {}, saveTimer: null
 };
 const savePref = () => ls.set('bm2.pref', S.pref);
@@ -363,8 +363,8 @@ function renderFrame() {
   if (!P) return;
   const pos = currentPositions(); S.pos = pos;
   const pp = currentPropPositions(); S.ppos = pp;
-  $('#gProps').innerHTML = P.props.map(pr => propSVG(pr, pp[pr.id], S.psel === pr.id && editable())).join('');
-  const spr = S.psel && editable() && P.props.find(x => x.id === S.psel);
+  $('#gProps').innerHTML = P.props.filter(pr => pp[pr.id]).map(pr => propSVG(pr, pp[pr.id], S.psel === pr.id && editable())).join('');
+  const spr = S.psel && editable() && P.props.find(x => x.id === S.psel && pp[x.id]);
   $('#gRH').innerHTML = spr ? (() => { const [X, Y] = toV(pp[spr.id]); return `<rect class="rh" x="${X + spr.w / 2 - .14}" y="${Y + spr.h / 2 - .14}" width=".28" height=".28"/>`; })() : '';
   for (const d of P.dancers) {
     const el = S.dEls[d.id]; if (!el) continue;
@@ -538,7 +538,7 @@ function thumbSVG(sc) {
   h += circ ? `<ellipse cx="0" cy="${d / 2}" rx="${w / 2}" ry="${d / 2}" fill="var(--floor)" stroke="rgba(255,255,255,.12)" stroke-width=".05"/>` : `<rect x="${-w / 2}" y="0" width="${w}" height="${d}" fill="var(--floor)" stroke="rgba(255,255,255,.12)" stroke-width=".05"/>`;
   h += `<line x1="0" y1="0" x2="0" y2="${d}" stroke="var(--tape)" stroke-width=".06" stroke-dasharray=".3 .15" opacity=".7"/>`;
   for (const pr of P.props) {
-    if (pr.type === 'text') continue; const q = propPos(pr, sc);
+    if (pr.type === 'text' || !propVisible(pr, sc)) continue; const q = propPos(pr, sc);
     h += (pr.type === 'round' || pr.type === 'takahari') ? `<ellipse cx="${q[0]}" cy="${d - q[1]}" rx="${pr.w / 2}" ry="${pr.h / 2}" fill="${pr.color}" opacity=".85"/>` : `<rect x="${q[0] - pr.w / 2}" y="${d - q[1] - pr.h / 2}" width="${pr.w}" height="${pr.h}" fill="${pr.color}" opacity=".85"/>`;
   }
   for (const dc of P.dancers) { const q = sc.pos[dc.id]; if (q) h += `<circle cx="${q[0]}" cy="${d - q[1]}" r=".38" fill="${dc.color}"/>`; }
@@ -688,6 +688,7 @@ function addSceneSheet() {
     card.querySelector('#nsGo').onclick = () => {
       checkpoint();
       const from = P.scenes[S.cur], sc = { id: uid(), name: card.querySelector('#nsName').value.trim() || `シーン${P.scenes.length + 1}`, soundId: pick, dur: 0, note: '', photos: [], pos: JSON.parse(JSON.stringify(from.pos)), ppos: JSON.parse(JSON.stringify(from.ppos || {})) };
+      P.props.forEach(pr => { if (pr.only && pr.only.includes(from.id)) pr.only.push(sc.id); });
       P.scenes.splice(S.cur + 1, 0, sc); S.cur++;
       closeSheet(); renderFrame(); renderScenes(); save();
       toast('シーンを追加しました。ダンサーを動かしてください');
@@ -885,13 +886,15 @@ const propPos = (pr, sc) => (pr.move && sc && sc.ppos && sc.ppos[pr.id]) || pr.p
 function currentPropPositions() {
   const sc = P.scenes[S.cur], out = {};
   for (const pr of P.props) {
+    if (!propVisible(pr, sc)) continue;
     let b = propPos(pr, sc);
     if (S.playing && S.cur > 0 && pr.move) { const a = propPos(pr, P.scenes[S.cur - 1]), u = ease(clamp(S.t / moveTime(), 0, 1)); b = [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u]; }
     out[pr.id] = S.anim && !S.playing ? lerpP(S.anim.from.p[pr.id], b, animU()) : b;
   }
   return out;
 }
-const propsAt = i => Object.fromEntries(P.props.map(pr => [pr.id, propPos(pr, P.scenes[i])]));
+const propVisible = (pr, sc) => !pr.only || pr.only.includes(sc.id);
+const propsAt = i => Object.fromEntries(P.props.filter(pr => propVisible(pr, P.scenes[i])).map(pr => [pr.id, propPos(pr, P.scenes[i])]));
 function propFont(pr) {
   const L = [...(pr.label || '')].length || 1;
   return pr.type === 'text' ? Math.max(0.14, Math.min(pr.h * 0.7, pr.w * 0.95 / L, 0.9)) : Math.max(0.12, Math.min(pr.h * 0.5, pr.w * 0.9 / L, 0.45));
@@ -909,8 +912,12 @@ function addPropSheet() {
   stop();
   openSheet(`<h2>道具を置く</h2>
     <div class="ptypes">${PROP_TYPES.map(t => `<button class="btn" data-act="propType" data-type="${t.type}"><svg viewBox="0 0 40 28" aria-hidden="true">${PROP_ICON[t.type]}</svg>${t.name}</button>`).join('')}</div>
-    <p>置いたあとは、ドラッグで移動・右下の□で大きさを変更・タップで文字や色を変更できます。</p>
-    <div class="acts"><button class="btn" data-act="closeSheet">閉じる</button></div>`);
+    <label class="chk"><input type="checkbox" id="apOnly" ${S.pref.propOnly ? 'checked' : ''}>このシーンだけに置く（オフなら全シーンに置く）</label>
+    <p>置いたあとは、ドラッグで移動・右下の□で大きさを変更・タップで文字や出すシーンを変更できます。</p>
+    ${P.props.length ? `<div class="field">置いてある道具（このシーン「${esc(P.scenes[S.cur].name)}」に出す・出さない）<ul class="list">${P.props.map(pr => { const on = propVisible(pr, P.scenes[S.cur]), tn = (PROP_TYPES.find(x => x.type === pr.type) || {}).name || '道具'; return `<li data-pid="${pr.id}"><div class="grow"><b>${esc(pr.label || tn)}</b><span>${tn}・${pr.only ? (pr.only.length ? pr.only.length + 'シーンに出す' : 'どのシーンにも出さない') : 'すべてのシーン'}</span></div><button class="btn sm ${on ? 'primary' : ''}" data-act="propToggle">${on ? '出す' : '出さない'}</button></li>`; }).join('')}</ul></div>` : ''}
+    <div class="acts"><button class="btn" data-act="closeSheet">閉じる</button></div>`, card => {
+    card.querySelector('#apOnly').addEventListener('change', e => { S.pref.propOnly = e.target.checked; savePref(); });
+  });
 }
 function addProp(type) {
   const t = PROP_TYPES.find(x => x.type === type); if (!t) return;
@@ -919,7 +926,7 @@ function addProp(type) {
   const pp = currentPropPositions(), busy = q => P.props.some(o => pp[o.id] && Math.abs(pp[o.id][0] - q[0]) < 1 && Math.abs(pp[o.id][1] - q[1]) < 0.6);
   const y0 = pos[1];
   find: for (const dy of [0, -1.2, 1.2]) for (const dx of [0, -2.5, 2.5, -4, 4, -1.25, 1.25]) { const q = [dx, clamp(y0 + dy, 0, d)]; if (!busy(q)) { pos = q; break find; } }
-  const pr = { id: uid(), type, label: t.label, w: t.w || w, h: t.h, color: t.color, move: false, pos };
+  const pr = { id: uid(), type, label: t.label, w: t.w || w, h: t.h, color: t.color, move: false, pos, only: S.pref.propOnly ? [P.scenes[S.cur].id] : null };
   checkpoint(); P.props.push(pr); S.psel = pr.id; S.sel.clear();
   closeSheet(); renderFrame(); renderScenes(); save();
   toast('置きました。ドラッグで移動、タップで文字や大きさを変更できます', 3500);
@@ -933,6 +940,7 @@ function propSheet(id) {
     <div class="row2"><label class="field">横（m）<input class="tin num" id="prW" type="number" inputmode="decimal" min="0.2" step="0.25" value="${pr.w}"></label>
     <label class="field">縦（m）<input class="tin num" id="prH" type="number" inputmode="decimal" min="0.2" step="0.25" value="${pr.h}"></label></div>
     ${pr.type === 'text' ? '' : `<label class="field">色<input type="color" class="sw" id="prC" value="${pr.color}"></label>`}
+    <div class="field">出すシーン（選んだシーンにだけ出ます）<div class="chips" id="prScenes"><button class="chip ${!pr.only ? 'on' : ''}" data-all="1">すべてのシーン</button>${P.scenes.map((sc, i) => `<button class="chip ${pr.only && pr.only.includes(sc.id) ? 'on' : ''}" data-sid="${sc.id}">${i + 1}. ${esc(sc.name)}</button>`).join('')}</div>${pr.only && !pr.only.length ? '<span class="hint">今はどのシーンにも出ていません。</span>' : ''}</div>
     <label class="chk"><input type="checkbox" id="prM" ${pr.move ? 'checked' : ''}>シーンごとに位置を変える（オフなら全シーンで同じ位置）</label>
     <div class="acts" style="justify-content:space-between"><div class="acts"><button class="btn sm" data-act="propSwap">縦横を入れ替え</button><button class="btn sm" data-act="propDup">複製</button><button class="btn sm danger" data-act="propDel">削除</button></div><button class="btn primary" data-act="closeSheet">完了</button></div>`, card => {
     let edited = false; const mark = () => { if (!edited) { checkpoint(); edited = true; } };
@@ -941,6 +949,13 @@ function propSheet(id) {
     card.querySelector('#prW').addEventListener('change', e => { mark(); pr.w = Math.max(0.2, parseFloat(e.target.value) || pr.w); upd(); });
     card.querySelector('#prH').addEventListener('change', e => { mark(); pr.h = Math.max(0.2, parseFloat(e.target.value) || pr.h); upd(); });
     const pc = card.querySelector('#prC'); if (pc) pc.addEventListener('input', e => { mark(); pr.color = e.target.value; upd(); });
+    card.querySelector('#prScenes').addEventListener('click', e => {
+      const b = e.target.closest('[data-all],[data-sid]'); if (!b) return;
+      mark();
+      if (b.dataset.all) pr.only = null;
+      else { const sid = b.dataset.sid; if (!pr.only) pr.only = [sid]; else if (pr.only.includes(sid)) pr.only = pr.only.filter(x => x !== sid); else pr.only.push(sid); }
+      upd(); propSheet(pr.id);
+    });
     card.querySelector('#prM').addEventListener('change', e => {
       mark(); pr.move = e.target.checked;
       if (pr.move) P.scenes.forEach(sc => { sc.ppos = sc.ppos || {}; if (!sc.ppos[pr.id]) sc.ppos[pr.id] = pr.pos.slice(); });
@@ -1264,7 +1279,7 @@ document.addEventListener('click', async e => {
       const d = +t.dataset.d, i = S.cur, j = i + d; if (j < 0 || j >= P.scenes.length) break;
       checkpoint(); const [sc] = P.scenes.splice(i, 1); P.scenes.splice(j, 0, sc); S.cur = j; save(); renderFrame(); renderScenes(); editSceneSheet(j); break;
     }
-    case 'dupScene': { checkpoint(); const c = JSON.parse(JSON.stringify(P.scenes[S.cur])); c.id = uid(); c.name += ' (コピー)'; c.photos = []; P.scenes.splice(S.cur + 1, 0, c); S.cur++; save(); renderFrame(); renderScenes(); closeSheet(); toast('シーンを複製しました'); break; }
+    case 'dupScene': { checkpoint(); const c = JSON.parse(JSON.stringify(P.scenes[S.cur])), oid = c.id; c.id = uid(); P.props.forEach(pr => { if (pr.only && pr.only.includes(oid)) pr.only.push(c.id); }); c.name += ' (コピー)'; c.photos = []; P.scenes.splice(S.cur + 1, 0, c); S.cur++; save(); renderFrame(); renderScenes(); closeSheet(); toast('シーンを複製しました'); break; }
     case 'delScene': {
       checkpoint(); P.scenes.splice(S.cur, 1); S.cur = clamp(S.cur - 1, 0, P.scenes.length - 1); save(); closeSheet(); renderFrame(); renderScenes(); toast('シーンを削除しました'); break;
     }
@@ -1276,6 +1291,13 @@ document.addEventListener('click', async e => {
     case 'stage': stageSheet(); break;
     case 'addProp': addPropSheet(); break;
     case 'propType': addProp(t.dataset.type); break;
+    case 'propToggle': {
+      const pr = P.props.find(x => x.id === li.dataset.pid), sc = P.scenes[S.cur]; if (!pr) break;
+      checkpoint();
+      if (propVisible(pr, sc)) pr.only = (pr.only || P.scenes.map(x => x.id)).filter(x => x !== sc.id);
+      else { pr.only = pr.only || []; pr.only.push(sc.id); if (P.scenes.every(x => pr.only.includes(x.id))) pr.only = null; }
+      renderFrame(); renderScenes(); save(); addPropSheet(); break;
+    }
     case 'propSwap': { const pr = P.props.find(x => x.id === S.propEdit); if (pr) { checkpoint(); [pr.w, pr.h] = [pr.h, pr.w]; renderFrame(); renderScenes(); save(); propSheet(pr.id); } break; }
     case 'propDup': { const pr = P.props.find(x => x.id === S.propEdit); if (pr) { checkpoint(); const c = JSON.parse(JSON.stringify(pr)); c.id = uid(); c.pos = [r2(pr.pos[0] + 0.5), pr.pos[1]]; P.props.push(c); P.scenes.forEach(sc => { if (sc.ppos && sc.ppos[pr.id]) sc.ppos[c.id] = [r2(sc.ppos[pr.id][0] + 0.5), sc.ppos[pr.id][1]]; }); S.psel = c.id; closeSheet(); renderFrame(); renderScenes(); save(); } break; }
     case 'propDel': {
