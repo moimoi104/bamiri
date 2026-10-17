@@ -355,7 +355,7 @@ function currentPositions() {
   if (S.playing && S.cur > 0) {
     const prev = P.scenes[S.cur - 1], u = ease(clamp(S.t / moveTime(), 0, 1));
     for (const d of P.dancers) { const a = posIn(prev, d.id), b = posIn(sc, d.id); out[d.id] = [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u]; }
-  } else for (const d of P.dancers) out[d.id] = posIn(sc, d.id);
+  } else for (const d of P.dancers) out[d.id] = S.anim ? lerpP(S.anim.from.d[d.id], posIn(sc, d.id), animU()) : posIn(sc, d.id);
   return out;
 }
 function pathD(a, b) { const A = toV(a), B = toV(b); return `M${A[0]} ${A[1]}L${B[0]} ${B[1]}`; }
@@ -556,9 +556,20 @@ function renderScenes() {
   const on = el.querySelector('.sc.on'); if (on) { const r = on.offsetLeft - el.scrollLeft; if (r < 0 || r > el.clientWidth - on.offsetWidth) el.scrollLeft = on.offsetLeft - 20; }
 }
 function goScene(i) {
-  if (S.playing) { startScene(clamp(i, 0, P.scenes.length - 1)); return; }
-  S.cur = clamp(i, 0, P.scenes.length - 1); renderFrame(); renderScenes();
+  i = clamp(i, 0, P.scenes.length - 1);
+  if (S.playing) { startScene(i); return; }
+  if (i === S.cur) return;
+  const from = { d: Object.assign({}, S.pos), p: Object.assign({}, S.ppos) };
+  S.cur = i; S.anim = { from, t0: performance.now(), dur: 550 };
+  renderScenes(); animStep();
 }
+function animStep() {
+  if (!S.anim) return;
+  if (performance.now() - S.anim.t0 >= S.anim.dur) { S.anim = null; renderFrame(); return; }
+  renderFrame(); requestAnimationFrame(animStep);
+}
+const animU = () => ease(clamp((performance.now() - S.anim.t0) / S.anim.dur, 0, 1));
+const lerpP = (a, b, u) => a ? [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u] : b;
 function rebuild() {
   $('#pname').value = P.name || '';
   for (const id of [...S.sel]) if (!P.dancers.some(d => d.id === id)) S.sel.delete(id);
@@ -758,7 +769,7 @@ async function sceneInfo() {
 function dancersSheet() {
   stop();
   openSheet(`<h2>ダンサー（${P.dancers.length}人）</h2>
-    <ul class="list">${P.dancers.map(d => `<li data-id="${d.id}"><input type="color" class="sw" value="${d.color}" data-dc aria-label="色"><input class="tin" value="${esc(d.name)}" data-dn aria-label="名前"><button class="mini ${S.me === d.id ? 'warn' : ''}" data-act="meToggle" title="自分にする">★</button><button class="mini ${pendingDel === d.id ? 'warn' : ''}" data-act="delDancer">${pendingDel === d.id ? '削除する' : '✕'}</button></li>`).join('')}</ul>
+    <ul class="list">${P.dancers.map(d => `<li data-id="${d.id}"><input type="color" class="sw" value="${d.color}" data-dc aria-label="色"><input class="tin" value="${esc(d.name)}" data-dn aria-label="名前"><button class="mini ${S.me === d.id ? 'warn' : ''}" data-act="meToggle" title="自分にする">★</button><button class="mini" data-act="delDancer" aria-label="削除">✕</button></li>`).join('')}</ul>
     <p>★を付けた人は、練習モードで自分として目立ちます（この端末だけの設定）。</p>
     <div class="acts"><button class="btn" data-act="addDancer">＋ 1人追加</button><button class="btn primary" data-act="closeSheet">完了</button></div>`, card => {
     let edited = false;
@@ -789,7 +800,7 @@ function worksSheet() {
     <div class="acts" style="justify-content:flex-start"><button class="btn primary" data-act="newWork">＋ 新しい作品</button><button class="btn" data-act="openFile">📂 ファイルを開く</button></div>
     <ul class="list">${list.map(p => {
       const dt = new Date(p.updatedAt || Date.now());
-      return `<li data-id="${p.id}" class="${P && p.id === P.id ? 'on' : ''}"><div class="grow" data-act="openWork" role="button"><b>${esc(p.name || '無題')}</b><span>${(p.dancers || []).length}人・${(p.scenes || []).length}シーン・音源${(p.sounds || []).length}・${dt.getMonth() + 1}/${dt.getDate()} ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}${P && p.id === P.id ? '・編集中' : ''}</span></div><button class="mini" data-act="dupWork">複製</button><button class="mini ${pendingDel === p.id ? 'warn' : ''}" data-act="delWork">${pendingDel === p.id ? '削除する' : '削除'}</button></li>`;
+      return `<li data-id="${p.id}" class="${P && p.id === P.id ? 'on' : ''}"><div class="grow" data-act="openWork" role="button"><b>${esc(p.name || '無題')}</b><span>${(p.dancers || []).length}人・${(p.scenes || []).length}シーン・音源${(p.sounds || []).length}・${dt.getMonth() + 1}/${dt.getDate()} ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}${P && p.id === P.id ? '・編集中' : ''}</span></div><button class="mini" data-act="dupWork">複製</button><button class="mini" data-act="delWork">削除</button></li>`;
     }).join('')}</ul>
     <p>作品はこの端末に自動で保存されます。LINEで受け取った作品ファイルは「ファイルを開く」で開けます。</p>
     <div class="acts"><button class="btn" data-act="closeSheet">閉じる</button></div>`);
@@ -876,7 +887,7 @@ function currentPropPositions() {
   for (const pr of P.props) {
     let b = propPos(pr, sc);
     if (S.playing && S.cur > 0 && pr.move) { const a = propPos(pr, P.scenes[S.cur - 1]), u = ease(clamp(S.t / moveTime(), 0, 1)); b = [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u]; }
-    out[pr.id] = b;
+    out[pr.id] = S.anim && !S.playing ? lerpP(S.anim.from.p[pr.id], b, animU()) : b;
   }
   return out;
 }
@@ -1221,8 +1232,7 @@ document.addEventListener('click', async e => {
     case 'dupWork': { const p = Store.get(li.dataset.id); if (!p) break; const c = JSON.parse(JSON.stringify(p)); c.id = uid() + uid(); c.name = (c.name || '') + ' のコピー'; c.updatedAt = Date.now(); Store.save(c); worksSheet(); break; }
     case 'delWork': {
       const id = li.dataset.id;
-      if (pendingDel !== id) { pendingDel = id; worksSheet(); setTimeout(() => { if (pendingDel === id) pendingDel = null; }, 4000); break; }
-      pendingDel = null; Store.remove(id);
+      Store.remove(id);
       if (P && P.id === id) { const rest = Store.list(); const p = rest[0] || newProject('新しい作品', 8); Store.save(p); openProject(p); }
       worksSheet(); toast('削除しました'); break;
     }
@@ -1231,8 +1241,7 @@ document.addEventListener('click', async e => {
     case 'meToggle': { const id = li.dataset.id; S.me = S.me === id ? null : id; ls.set('bm2.me.' + P.id, S.me); renderFrame(); dancersSheet(); break; }
     case 'delDancer': {
       const id = li.dataset.id;
-      if (pendingDel !== id) { pendingDel = id; dancersSheet(); setTimeout(() => { if (pendingDel === id) pendingDel = null; }, 4000); break; }
-      pendingDel = null; checkpoint(); P.dancers = P.dancers.filter(d => d.id !== id); for (const sc of P.scenes) delete sc.pos[id];
+      checkpoint(); P.dancers = P.dancers.filter(d => d.id !== id); for (const sc of P.scenes) delete sc.pos[id];
       rebuild(); save(); dancersSheet(); break;
     }
     case 'sounds': stop(); soundsSheet(); break;
@@ -1248,8 +1257,7 @@ document.addEventListener('click', async e => {
     }
     case 'delSound': {
       const id = li.dataset.id;
-      if (pendingDel !== id) { pendingDel = id; t.textContent = '本当に削除'; t.classList.add('warn'); setTimeout(() => { if (pendingDel === id) pendingDel = null; }, 4000); break; }
-      pendingDel = null; checkpoint(); P.sounds = P.sounds.filter(s => s.id !== id); P.scenes.forEach(sc => { if (sc.soundId === id) sc.soundId = null; });
+      checkpoint(); P.sounds = P.sounds.filter(s => s.id !== id); P.scenes.forEach(sc => { if (sc.soundId === id) sc.soundId = null; });
       save(); renderScenes(); renderInfo(); soundsSheet(); break;
     }
     case 'moveScene': {
@@ -1258,12 +1266,10 @@ document.addEventListener('click', async e => {
     }
     case 'dupScene': { checkpoint(); const c = JSON.parse(JSON.stringify(P.scenes[S.cur])); c.id = uid(); c.name += ' (コピー)'; c.photos = []; P.scenes.splice(S.cur + 1, 0, c); S.cur++; save(); renderFrame(); renderScenes(); closeSheet(); toast('シーンを複製しました'); break; }
     case 'delScene': {
-      if (t.dataset.confirm !== '1') { t.dataset.confirm = '1'; t.textContent = '本当に削除'; break; }
       checkpoint(); P.scenes.splice(S.cur, 1); S.cur = clamp(S.cur - 1, 0, P.scenes.length - 1); save(); closeSheet(); renderFrame(); renderScenes(); toast('シーンを削除しました'); break;
     }
     case 'viewPhoto': viewPhoto(t.dataset.ph); break;
     case 'delPhoto': {
-      if (t.dataset.confirm !== '1') { t.dataset.confirm = '1'; t.textContent = '本当に削除'; break; }
       checkpoint(); const sc = P.scenes[S.cur]; sc.photos = sc.photos.filter(p => p.id !== t.dataset.ph); IDB.del('p:' + t.dataset.ph); save(); renderScenes(); editSceneSheet(S.cur); break;
     }
     case 'closeSheet': closeSheet(); break;
@@ -1273,7 +1279,6 @@ document.addEventListener('click', async e => {
     case 'propSwap': { const pr = P.props.find(x => x.id === S.propEdit); if (pr) { checkpoint(); [pr.w, pr.h] = [pr.h, pr.w]; renderFrame(); renderScenes(); save(); propSheet(pr.id); } break; }
     case 'propDup': { const pr = P.props.find(x => x.id === S.propEdit); if (pr) { checkpoint(); const c = JSON.parse(JSON.stringify(pr)); c.id = uid(); c.pos = [r2(pr.pos[0] + 0.5), pr.pos[1]]; P.props.push(c); P.scenes.forEach(sc => { if (sc.ppos && sc.ppos[pr.id]) sc.ppos[c.id] = [r2(sc.ppos[pr.id][0] + 0.5), sc.ppos[pr.id][1]]; }); S.psel = c.id; closeSheet(); renderFrame(); renderScenes(); save(); } break; }
     case 'propDel': {
-      if (t.dataset.confirm !== '1') { t.dataset.confirm = '1'; t.textContent = '本当に削除'; break; }
       checkpoint(); const id = S.propEdit; P.props = P.props.filter(x => x.id !== id); P.scenes.forEach(sc => { if (sc.ppos) delete sc.ppos[id]; }); S.psel = null;
       closeSheet(); renderFrame(); renderScenes(); save(); toast('道具を削除しました'); break;
     }
